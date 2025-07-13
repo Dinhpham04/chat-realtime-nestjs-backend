@@ -202,11 +202,27 @@ src/
 - Setup project, Docker, kết nối MongoDB Atlas, Redis Cloud
 - Auth module: đăng ký, đăng nhập, JWT, refresh token
 - User profile cơ bản
+  - task: 
+      1. 🔐 Setup Authentication Module (Tuần 1)
+    Tại sao đầu tiên: Hầu hết API endpoints cần authentication
+    Tasks:
+    - Tạo User Schema/Entity với Mongoose
+    - Implement JWT Authentication Strategy
+    - Tạo Auth Controller (register, login, refresh token)
+    - Implement JwtAuthGuard
+    - Setup password hashing với bcrypt
 
 ### Tuần 2: User & Friend
 - User CRUD, update profile, upload avatar
 - Friend request, accept/decline/block
 - Tìm kiếm user
+  2. 👤 Users Module (Tuần 1-2)
+      - Phụ thuộc: Auth module hoàn thành
+      Tasks:
+      - User CRUD operations
+      - User profile management
+      - Online/offline status tracking
+      - User search functionality
 
 ### Tuần 3: Conversation
 - Tạo/join/leave conversation
