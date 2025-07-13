@@ -1,6 +1,8 @@
 import { Controller, Get } from '@nestjs/common';
 import { RedisCacheService, RealTimeStateService } from '../services';
+import { Public } from 'src/shared';
 
+@Public()
 @Controller('redis')
 export class RedisHealthController {
   constructor(

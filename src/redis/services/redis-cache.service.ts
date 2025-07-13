@@ -1,6 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { Redis } from 'ioredis';
-import { IOREDIS_CLIENT } from '../redis.module';
+import Redis from 'ioredis';
 
 export interface CachedMessage {
   id: string;
@@ -24,7 +23,7 @@ export interface UserSession {
 
 @Injectable()
 export class RedisCacheService {
-  constructor(@Inject(IOREDIS_CLIENT) private readonly redis: Redis) { }
+  constructor(@Inject("IOREDIS_CLIENT") private readonly redis: Redis) { }
 
   // =============================================
   // Message Caching

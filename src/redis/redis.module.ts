@@ -8,21 +8,18 @@ import {
     RedisCleanupService
 } from './services';
 import { RedisHealthController } from './controllers/redis-health.controller';
-
-export const REDIS_CLIENT = 'REDIS_CLIENT';
-export const IOREDIS_CLIENT = 'IOREDIS_CLIENT';
+const IOREDIS_CLIENT = 'IOREDIS_CLIENT';
 
 @Module({
-    imports: [ConfigModule],
     controllers: [RedisHealthController],
     providers: [
         {
             provide: IOREDIS_CLIENT,
             useFactory: (configService: ConfigService) => {
                 return new Redis({
-                    host: configService.get('redis.host'),
+                    host: configService.get('redis.host') || 'localhost',
                     port: Number(configService.get('redis.port')) || 6379,
-                    password: configService.get('redis.password'),
+                    password: configService.get('redis.password') || undefined,
                     connectTimeout: 10000,
                     lazyConnect: true,
                     maxRetriesPerRequest: 3,

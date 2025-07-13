@@ -1,7 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
-import { Redis } from 'ioredis';
-import { IOREDIS_CLIENT } from '../redis.module';
+import Redis from 'ioredis';
 import { ActivityStatus } from '../../modules/users/enums';
+import { Inject, Injectable } from '@nestjs/common';
 
 export interface UserPresence {
   userId: string;
@@ -21,7 +20,7 @@ export interface TypingStatus {
 @Injectable()
 export class RealTimeStateService {
   constructor(
-    @Inject(IOREDIS_CLIENT) private readonly redis: Redis,
+    @Inject('IOREDIS_CLIENT') private readonly redis: Redis
   ) { }
 
   // =============================================
