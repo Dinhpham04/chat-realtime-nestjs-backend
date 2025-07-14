@@ -6,6 +6,7 @@ export interface IUsersRepository {
   create(userData: Partial<UserCore>): Promise<UserDocument>;
   findById(id: string): Promise<UserDocument | null>;
   findByEmail(email: string): Promise<UserDocument | null>;
+  findByPhoneNumber(phoneNumber: string): Promise<UserDocument | null>;
   updateById(id: string, updateData: Partial<UserCore>): Promise<UserDocument | null>;
   softDelete(id: string): Promise<boolean>;
 

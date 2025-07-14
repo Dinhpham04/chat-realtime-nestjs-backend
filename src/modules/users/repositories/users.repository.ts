@@ -47,7 +47,17 @@ export class UsersRepository implements IUsersRepository {
     } catch (error) {
       this.logger.error(`Failed to find user by email ${email}: ${error.message}`);
       throw error;
+    }
+  }
 
+  async findByPhoneNumber(phoneNumber: string): Promise<UserDocument | null> {
+    try {
+      return await this.userModel
+        .findOne({ phoneNumber })
+        .exec();
+    } catch (error) {
+      this.logger.error(`Failed to find user by phone number ${phoneNumber}: ${error.message}`);
+      throw error;
     }
   }
 

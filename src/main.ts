@@ -2,7 +2,15 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
+import { setupSwagger } from './shared/utils/swagger/setupSwagger';
 
+/**
+ * Bootstrap function - Application entry point
+ * Following Senior Guidelines:
+ * - Documentation is Key: Complete Swagger setup
+ * - Security First: Proper authentication documentation
+ * - Performance: Optimized Swagger configuration
+ */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
@@ -26,10 +34,17 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Swagger Configuration - Senior Level Documentation
+  setupSwagger(app, apiPrefix);
+
   const port = configService.get('port');
   await app.listen(port);
   console.log(
     `🚀 Application is running on: http://localhost:${port}/${apiPrefix}`,
   );
+  console.log(
+    `📚 Swagger documentation: http://localhost:${port}/${apiPrefix}/docs`,
+  );
 }
+
 bootstrap();
