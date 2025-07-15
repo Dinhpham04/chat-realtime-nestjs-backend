@@ -43,8 +43,8 @@ export class AuthService {
     this.deviceService.validateDeviceInfo(registerData.deviceInfo);
 
     const hashedPassword = await this.hashPassword(registerData.password);
-    const userCore = await this.createUserCore(registerData.phoneNumber, registerData.fullName || 'New User');
-    await this.createUserSecurity(userCore._id.toString(), hashedPassword);
+    const userCore = await this.createUserCore(registerData.phoneNumber, registerData.fullName || 'New User', hashedPassword);
+    await this.createUserSecurity(userCore._id.toString());
 
     await this.deviceService.registerDevice(userCore._id.toString(), registerData.deviceInfo);
 
@@ -56,6 +56,13 @@ export class AuthService {
     return authResponse;
   }
 
+  private async findUserByPhone(phoneNumber: string): Promise<any> {
+    const userCore = await this.usersRepository.findByPhoneNumber(phoneNumber);
+    if (!userCore) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    return userCore;
+  }
   /**
    * Login user with phone and password
    */
@@ -64,7 +71,7 @@ export class AuthService {
     const userSecurity = await this.getUserSecurity(userCore._id.toString());
 
     await this.validateUserCanLogin(userSecurity);
-    await this.verifyUserPassword(loginData.password, userSecurity, loginData.phoneNumber);
+    await this.verifyUserPassword(loginData.password, userCore, loginData.phoneNumber, userSecurity);
 
     this.deviceService.validateDeviceInfo(loginData.deviceInfo);
     await this.deviceService.registerDevice(userCore._id.toString(), loginData.deviceInfo);
@@ -93,6 +100,8 @@ export class AuthService {
 
     this.logger.log(`Token refreshed for user: ${userCore.phoneNumber}`);
     return { accessToken, expiresIn };
+
+    // Optional: thu hồi refresh token
   }
 
   /**
@@ -103,6 +112,7 @@ export class AuthService {
     await this.deviceService.removeDevice(userId, deviceId);
 
     this.logger.log(`User logged out from device: ${userId}:${deviceId}`);
+    // Optionally, you can also revoke tokens here if needed
   }
 
   /**
@@ -143,16 +153,17 @@ export class AuthService {
     }
   }
 
-  private async createUserCore(phoneNumber: string, fullName?: string): Promise<any> {
+  private async createUserCore(phoneNumber: string, fullName: string, passwordHash: string): Promise<any> {
     return await this.usersRepository.create({
       fullName: fullName || 'New User',
       phoneNumber,
+      passwordHash, // Store password hash in UserCore
       status: UserStatus.ACTIVE,
       isPhoneVerified: true, // For MVP, assume phone is verified
     });
   }
 
-  private async createUserSecurity(userId: string, hashedPassword: string): Promise<void> {
+  private async createUserSecurity(userId: string): Promise<void> {
     await this.authRepository.createUserSecurity(userId, {
       failedLoginAttempts: 0,
       securityLogs: [{
@@ -172,13 +183,7 @@ export class AuthService {
     });
   }
 
-  private async findUserByPhone(phoneNumber: string): Promise<any> {
-    const userCore = await this.usersRepository.findByPhoneNumber(phoneNumber);
-    if (!userCore) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-    return userCore;
-  }
+
 
   private async getUserSecurity(userId: string): Promise<any> {
     const userSecurity = await this.authRepository.findUserSecurityByUserId(userId);
@@ -199,14 +204,30 @@ export class AuthService {
     return new Date() < userSecurity.lockedUntil;
   }
 
-  private async verifyUserPassword(password: string, userSecurity: any, phoneNumber: string): Promise<void> {
-    // Simplified for current schema - in production would verify against stored hash
-    const isPasswordValid = password.length >= 6; // Basic validation for now
-
-    if (!isPasswordValid) {
+  private async verifyUserPassword(password: string, userCore: any, phoneNumber: string, userSecurity: any): Promise<void> {
+    // Get stored password hash from userCore
+    const userFound = await this.usersRepository.findByPhoneNumber(phoneNumber);
+    if (!userFound) {
+      this.logger.error(`No user found with phone: ${phoneNumber}`);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    const storedPasswordHash = userFound.passwordHash;
+    if (!storedPasswordHash) {
+      this.logger.error(`No password hash found for user: ${phoneNumber}`);
       await this.handleFailedLogin(userSecurity, phoneNumber);
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    // Compare provided password with stored hash using bcrypt
+    const isPasswordValid = await bcrypt.compare(password, storedPasswordHash);
+
+    if (!isPasswordValid) {
+      this.logger.warn(`Invalid password attempt for user: ${phoneNumber}`);
+      await this.handleFailedLogin(userSecurity, phoneNumber);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    this.logger.debug(`Password verified successfully for user: ${phoneNumber}`);
   }
 
   private async handleSuccessfulLogin(userSecurity: any, phoneNumber: string): Promise<void> {

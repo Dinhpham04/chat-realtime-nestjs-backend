@@ -13,7 +13,6 @@ import { AuthModule } from './modules/auth/auth.module';
 // Import shared components
 import {
   GlobalExceptionFilter,
-  JwtAuthExceptionFilter,
   JwtAuthGuard,
   LoggingInterceptor,
   RequestIdMiddleware,
@@ -30,9 +29,9 @@ import {
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'default-secret',
-      signOptions: {
-        expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m'
-      },
+      // signOptions: {
+      //   expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m'
+      // },
     }),
     DatabaseModule,
     RedisModule,
@@ -47,10 +46,10 @@ import {
       provide: APP_FILTER,
       useClass: GlobalExceptionFilter,
     },
-    {
-      provide: APP_FILTER,
-      useClass: JwtAuthExceptionFilter,
-    },
+    // {
+    //   provide: APP_FILTER,
+    //   useClass: JwtAuthExceptionFilter,
+    // },
     // // Global Guards
     // {
     //   provide: APP_GUARD,

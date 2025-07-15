@@ -4,7 +4,6 @@
 
 // Exception Filters
 export * from './filters/global-exception.filter';
-export * from './filters/jwt-auth-exception.filter';
 
 // Guards
 export * from './guards/jwt-auth.guard';

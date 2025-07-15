@@ -24,7 +24,6 @@ export class UserDevice {
   // Essential device identification
   @Prop({
     required: true,
-    unique: true,
     trim: true
   })
   deviceId: string;
@@ -39,7 +38,6 @@ export class UserDevice {
   // Push notification essentials only
   @Prop({
     required: false,
-    sparse: true
   })
   pushToken?: string;
 
@@ -79,8 +77,8 @@ export const UserDeviceSchema = SchemaFactory.createForClass(UserDevice);
 
 // Essential indexes
 UserDeviceSchema.index({ userId: 1 });
-UserDeviceSchema.index({ deviceId: 1 });
-UserDeviceSchema.index({ pushToken: 1 }, { sparse: true });
+UserDeviceSchema.index({ userId: 1, deviceId: 1 });
+UserDeviceSchema.index({ userId: 1, pushToken: 1 });
 UserDeviceSchema.index({ userId: 1, isActive: 1 });
 UserDeviceSchema.index({ isDeleted: 1 });
 

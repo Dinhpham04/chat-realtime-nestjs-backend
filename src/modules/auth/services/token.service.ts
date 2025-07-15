@@ -53,7 +53,6 @@ export class TokenService {
 
     return this.jwtService.signAsync(payload, {
       secret: this.configService.get<string>('jwt.secret'),
-      expiresIn: this.configService.get<string>('jwt.expiresIn', '15m'),
     });
   }
 
@@ -74,7 +73,6 @@ export class TokenService {
 
     return this.jwtService.signAsync(payload, {
       secret: this.configService.get<string>('jwt.refreshSecret'),
-      expiresIn: this.configService.get<string>('jwt.refreshExpiresIn', '7d'),
     });
   }
 

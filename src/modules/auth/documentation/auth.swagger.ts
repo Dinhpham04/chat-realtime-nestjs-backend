@@ -298,7 +298,7 @@ Get new access token using refresh token.
  */
 export function LogoutApiDocs() {
   return applyDecorators(
-    ApiBearerAuth(),
+    ApiBearerAuth('JWT-auth'),
     ApiOperation({
       summary: 'Logout from current device',
       description: `
@@ -333,7 +333,7 @@ Logout user from current device.
  */
 export function LogoutAllApiDocs() {
   return applyDecorators(
-    ApiBearerAuth(),
+    ApiBearerAuth('JWT-auth'),
     ApiOperation({
       summary: 'Logout from all devices',
       description: `
@@ -369,7 +369,7 @@ Logout user from all registered devices.
  */
 export function GetProfileApiDocs() {
   return applyDecorators(
-    ApiBearerAuth(),
+    ApiBearerAuth('JWT-auth'),
     ApiOperation({
       summary: 'Get current user profile',
       description: `

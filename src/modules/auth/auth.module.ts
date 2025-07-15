@@ -43,9 +43,9 @@ import { IDeviceRepository } from './interfaces/device-repository.interface';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('jwt.secret'),
-        signOptions: {
-          expiresIn: configService.get<string>('jwt.expiresIn'),
-        },
+        // signOptions: {
+        //   expiresIn: configService.get<string>('jwt.expiresIn'),
+        // },
       }),
     }),
 

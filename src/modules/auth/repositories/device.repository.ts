@@ -240,8 +240,8 @@ export class DeviceRepository implements IDeviceRepository {
         return null;
       }
       const device = await this.deviceModel.findOneAndUpdate(
-        { userId: new Types.ObjectId(userId), deviceId, isActive: true },
-        { pushToken, updatedAt: new Date() },
+        { userId: new Types.ObjectId(userId), deviceId },
+        { pushToken, updatedAt: new Date(), isActive: true },
         { new: true }
       ).exec();
 
@@ -327,7 +327,7 @@ export class DeviceRepository implements IDeviceRepository {
   // Bulk operations
   async createOrUpdateDevice(userId: string, deviceInfo: DeviceInfo): Promise<UserDevice> {
     try {
-      if (!Types.ObjectId.isValid(userId)) {
+      if (!Types.ObjectId.isValid(userId) && !Types.ObjectId.isValid(deviceInfo.deviceId)) {
         throw new Error('Invalid user ID');
       }
 
@@ -350,6 +350,10 @@ export class DeviceRepository implements IDeviceRepository {
         update,
         { new: true, upsert: true }
       ).exec();
+
+      if (!device) {
+        throw new NotFoundException('Device not found or could not be created');
+      }
 
       this.logger.log(`Device created/updated for user ${userId}: ${deviceInfo.deviceId}`);
       return device;

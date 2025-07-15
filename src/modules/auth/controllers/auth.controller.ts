@@ -27,6 +27,7 @@ import {
   GetProfileApiDocs,
   HealthCheckApiDocs,
 } from '../documentation/auth.swagger';
+import { RateLimitGuard } from '../guards/rate-limit.guard';
 
 /**
  * Authentication Controller - Enterprise Level
@@ -40,6 +41,7 @@ import {
  */
 @ApiTags('Authentication')
 @Controller('auth')
+@UseGuards(RateLimitGuard)
 @ApiConsumes('application/json')
 @ApiProduces('application/json')
 export class AuthController {
@@ -73,6 +75,7 @@ export class AuthController {
         deviceName: registerDto.deviceInfo.deviceName,
         platform: registerDto.deviceInfo.platform,
         appVersion: registerDto.deviceInfo.appVersion,
+        pushToken: registerDto.deviceInfo.pushToken,
         lastLoginAt: new Date(),
         isActive: true,
       },
