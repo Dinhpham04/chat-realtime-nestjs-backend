@@ -61,6 +61,7 @@ export interface LoginCredentials {
 }
 
 export interface RegisterCredentials extends LoginCredentials {
+  fullName?: string;
   confirmPassword: string;
 }
 

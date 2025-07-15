@@ -42,6 +42,12 @@ export class RegisterDto {
   })
   password: string;
 
+  @IsString()
+  @IsNotEmpty({ message: 'Full name is required' })
+  @MinLength(2, { message: 'Full name must be at least 2 characters long' })
+  @MaxLength(100, { message: 'Full name must not exceed 100 characters' })
+  fullName?: string;
+
   @ApiProperty({
     description: 'Password confirmation (must match password)',
     example: 'SecurePass123!',

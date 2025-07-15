@@ -27,7 +27,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') { // 'jwt' is
   /**
    * Validate JWT payload and return user information
    */
-  async validate(payload: any): Promise<JwtUser> {
+  async validate(payload: any): Promise<JwtUser> { // if token is valid, this method is called
     this.logger.debug(`Validating JWT payload for user: ${payload.sub}`);
 
     try {

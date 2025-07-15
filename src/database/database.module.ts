@@ -8,6 +8,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
         uri: configService.get<string>('database.uri'),
+        user: configService.get<string>('database.user'),
+        pass: configService.get<string>('database.password'),
+        authSource: configService.get<string>('database.authSource'),
         useNewUrlParser: true,
         useUnifiedTopology: true,
         maxPoolSize: 10, // Số connection tối đa

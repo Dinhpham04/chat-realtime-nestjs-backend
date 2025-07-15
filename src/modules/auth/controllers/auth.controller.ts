@@ -64,6 +64,7 @@ export class AuthController {
 
     const result = await this.authService.register({
       phoneNumber: registerDto.phoneNumber,
+      fullName: registerDto.fullName,
       password: registerDto.password,
       confirmPassword: registerDto.confirmPassword,
       deviceInfo: {

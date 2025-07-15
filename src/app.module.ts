@@ -51,11 +51,11 @@ import {
       provide: APP_FILTER,
       useClass: JwtAuthExceptionFilter,
     },
-    // Global Guards
-    {
-      provide: APP_GUARD,
-      useClass: JwtAuthGuard,
-    },
+    // // Global Guards
+    // {
+    //   provide: APP_GUARD,
+    //   useClass: JwtAuthGuard,
+    // },
     // Global Interceptors
     {
       provide: APP_INTERCEPTOR,

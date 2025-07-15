@@ -3,7 +3,10 @@ export default () => ({
   apiPrefix: process.env.API_PREFIX || 'api/v1',
 
   database: {
-    uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/messaging-app',
+    uri: process.env.MONGODB_URI || `mongodb://localhost:27017/messaging-app`,
+    user: process.env.MONGODB_USER || 'admin',
+    password: process.env.MONGODB_PASSWORD || 'admin123',
+    authSource: process.env.MONGODB_AUTH_SOURCE || 'admin',
   },
 
   redis: {

@@ -43,7 +43,7 @@ export class AuthService {
     this.deviceService.validateDeviceInfo(registerData.deviceInfo);
 
     const hashedPassword = await this.hashPassword(registerData.password);
-    const userCore = await this.createUserCore(registerData.phoneNumber);
+    const userCore = await this.createUserCore(registerData.phoneNumber, registerData.fullName || 'New User');
     await this.createUserSecurity(userCore._id.toString(), hashedPassword);
 
     await this.deviceService.registerDevice(userCore._id.toString(), registerData.deviceInfo);
@@ -143,8 +143,9 @@ export class AuthService {
     }
   }
 
-  private async createUserCore(phoneNumber: string): Promise<any> {
+  private async createUserCore(phoneNumber: string, fullName?: string): Promise<any> {
     return await this.usersRepository.create({
+      fullName: fullName || 'New User',
       phoneNumber,
       status: UserStatus.ACTIVE,
       isPhoneVerified: true, // For MVP, assume phone is verified

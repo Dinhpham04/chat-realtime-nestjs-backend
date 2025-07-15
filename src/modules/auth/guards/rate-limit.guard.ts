@@ -111,15 +111,21 @@ export class RateLimitGuard implements CanActivate {
     return this.defaultLimits.default;
   }
 
+  /**
+   * 
+   * @param key 
+   * @param windowSeconds: time limit expire in seconds
+   * @returns 
+   */
   private async incrementCounter(key: string, windowSeconds: number): Promise<number> {
     const redisKey = `rate_limit:${key}`;
 
     // Use Redis pipeline for atomic operations
     const pipeline = this.redis.pipeline();
-    pipeline.incr(redisKey);
-    pipeline.expire(redisKey, windowSeconds);
+    pipeline.incr(redisKey); // instruction 1;
+    pipeline.expire(redisKey, windowSeconds); // instruction 
 
-    const results = await pipeline.exec();
+    const results = await pipeline.exec(); // Execute both instructions atomically returning an array of results
 
     if (!results || results[0][1] === null) {
       throw new Error('Failed to increment rate limit counter');
