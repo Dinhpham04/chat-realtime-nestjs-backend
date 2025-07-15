@@ -15,6 +15,7 @@
 
 ### Yêu cầu bắt buộc:
 - **Clean Architecture**: Tách rõ Controller, Service, Repository, Model
+  - service: chứa logic nghiệp vụ không thao tác trực tiếp với database mà qua repository (implement interface repository)
 - **SOLID Principles**: Single Responsibility, Open/Closed, Liskov, Interface Segregation, Dependency Inversion
 - **Design Patterns**: Factory, Strategy, Observer, Singleton khi cần thiết
 - **RESTful API**: Chuẩn HTTP methods, status codes, resource naming
@@ -57,6 +58,7 @@
 - **Error Handling**: Try-catch, custom errors, proper logging
 - **Naming**: Descriptive, consistent, no abbreviations
 - **Comments**: Why, not what. Document complex business logic
+- **No hard code**: Use environment variables or declarative configuration
 
 ---
 
@@ -105,13 +107,12 @@
 ## 6. 📚 Documentation Requirements
 
 ### API Documentation:
-- OpenAPI/Swagger specification
+- OpenAPI/Swagger specification: don't write swagger documentation directly, use decorators in code
 - Postman
 - Request/response examples
 - Error codes and messages
 - Authentication requirements
 - Rate limiting information
-
 ### Code Documentation:
 - README with setup instructions
 - Architecture decision records (ADRs)

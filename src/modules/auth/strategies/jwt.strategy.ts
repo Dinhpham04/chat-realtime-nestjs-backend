@@ -10,7 +10,7 @@ import { JwtUser } from '../interfaces/jwt-payload.interface';
  * Validates JWT access tokens and extracts user information
  */
 @Injectable()
-export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
+export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') { // 'jwt' is strategy name
   private readonly logger = new Logger(JwtStrategy.name);
 
   constructor(
@@ -19,7 +19,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ignoreExpiration: false,
+      ignoreExpiration: false, // check token expiration
       secretOrKey: configService.get('jwt.secret') || 'default-secret-key',
     });
   }
