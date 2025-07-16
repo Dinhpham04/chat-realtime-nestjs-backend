@@ -10,7 +10,7 @@
 - Trả lời câu hỏi bằng cách giải thích rõ ràng, không chỉ đưa ra code
 - **Tư duy phản biện**: Luôn đặt câu hỏi và tìm hiểu sâu
 - trả lời bằng tiếng việt
-
+- **Tư duy sẩn phẩm**: Không cố gắng tối ưu hóa quá sớm, tập trung vào giải pháp đơn giản và hiệu quả trước
 ---
 
 ## 1. 🏗️ Architecture & Design Principles
@@ -26,7 +26,7 @@
 ### Quy trình thiết kế:
 1. **Phân tích nghiệp vụ**: User stories, use cases, edge cases
 2. **Thiết kế database**: ERD, indexes, constraints, performance
-3. **API Design**: Endpoints, request/response, error handling
+3. **API Design**: Endpoints, request/response, validate, error handling
 4. **Security Design**: Authentication, authorization, data validation
 5. **Performance Design**: Caching, pagination, optimization
 
@@ -45,7 +45,7 @@
 ### Performance Requirements:
 - Response time < 200ms for 95% requests
 - Database queries optimized (indexes, N+1 prevention)
-- Caching strategy (Redis, memory cache)
+- Caching strategy (ioRedis, memory cache)
 - Pagination for large datasets
 - Error handling without data leakage
 
