@@ -10,8 +10,11 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiConsumes, ApiProduces, ApiOperation, ApiBody, ApiResponse, ApiParam } from '@nestjs/swagger';
-
+import {
+  ApiTags,
+  ApiConsumes,
+  ApiProduces,
+} from '@nestjs/swagger';
 import { DeviceService } from '../services/device.service';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
@@ -26,16 +29,16 @@ import {
   DeactivateDeviceApiDocs,
   GetCurrentDeviceApiDocs,
 } from '../documentation/device.swagger';
-import { ApiErrorResponseDto, DeviceInfoResponseDto } from '../dto/response.dto';
 
 /**
- * Device Management Controller
+ * Device Management Controller - Clean Architecture
  * 
  * Following instruction-senior.md:
  * - Complete API documentation with OpenAPI/Swagger
  * - One controller per main domain/route
  * - Security-first approach with JWT authentication
  * - Error handling with proper status codes
+ * - Clean separation of documentation
  */
 @ApiTags('Devices')
 @Controller('devices')
@@ -46,12 +49,26 @@ export class DeviceController {
   constructor(private readonly deviceService: DeviceService) { }
 
   /**
-   * Get all user devices
+   * Get all user devices with pagination and filtering
    */
   @Get()
   @GetAllDevicesApiDocs()
-  async getUserDevices(@CurrentUser() user: any) {
+  async getUserDevices(
+    @CurrentUser() user: any,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: string
+  ) {
     return this.deviceService.getUserDevices(user.userId);
+  }
+
+  /**
+   * Get current device information
+   */
+  @Get('current')
+  @GetCurrentDeviceApiDocs()
+  async getCurrentDevice(@CurrentUser() user: any) {
+    return this.deviceService.getDevice(user.userId, user.deviceId);
   }
 
   /**
@@ -67,228 +84,64 @@ export class DeviceController {
   }
 
   /**
-   * Register or update device
+   * Register new device
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({
-    summary: 'Register or update device',
-    description: `
-## Device Registration
-
-Register a new device or update an existing device for the current user.
-
-### Business Rules:
-- Maximum 5 devices per user
-- Oldest device automatically removed when limit exceeded
-- Existing devices are updated with new push tokens
-- Device ID must be unique per user
-
-### Validation Rules:
-- Device ID: minimum 10 characters
-- Device name: maximum 100 characters  
-- Device type: mobile, web, or desktop
-- Platform: ios, android, web, windows, macos
-    `,
-  })
-  @ApiBody({
-    type: DeviceInfoDto,
-    description: 'Device information to register',
-    examples: {
-      'iOS Device': {
-        summary: 'iPhone registration',
-        value: {
-          deviceId: 'mobile_device_12345',
-          deviceName: 'iPhone 15 Pro',
-          deviceType: 'mobile',
-          platform: 'ios',
-          pushToken: 'expo_push_token_xyz789'
-        }
-      },
-      'Web Device': {
-        summary: 'Web browser registration',
-        value: {
-          deviceId: 'web_device_67890',
-          deviceName: 'Chrome Browser',
-          deviceType: 'web',
-          platform: 'web'
-        }
-      }
-    }
-  })
-  @ApiResponse({
-    status: HttpStatus.CREATED,
-    description: 'Device registered or updated successfully',
-    type: DeviceInfoResponseDto,
-  })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Invalid device information',
-    type: ApiErrorResponseDto,
-  })
+  @RegisterDeviceApiDocs()
   async registerDevice(
     @CurrentUser() user: any,
-    @Body() deviceInfoDto: DeviceInfoDto,
+    @Body() deviceInfo: DeviceInfoDto,
   ) {
-    // Convert DTO to DeviceInfo interface with proper typing
-    const deviceInfo: DeviceInfo = {
-      deviceId: deviceInfoDto.deviceId,
-      deviceName: deviceInfoDto.deviceName,
-      deviceType: deviceInfoDto.deviceType as 'mobile' | 'web' | 'desktop',
-      platform: deviceInfoDto.platform,
-      appVersion: deviceInfoDto.appVersion,
-      userAgent: deviceInfoDto.userAgent,
-      pushToken: deviceInfoDto.pushToken,
+    // Convert DTO to interface format
+    const deviceData: DeviceInfo = {
+      deviceId: deviceInfo.deviceId,
+      deviceType: deviceInfo.deviceType as any,
+      deviceName: deviceInfo.deviceName,
+      platform: deviceInfo.platform,
+      appVersion: deviceInfo.appVersion,
+      pushToken: deviceInfo.pushToken,
       lastLoginAt: new Date(),
       isActive: true,
     };
-    return this.deviceService.registerDevice(user.userId, deviceInfo);
+
+    return this.deviceService.registerDevice(user.userId, deviceData);
   }
 
   /**
-   * Remove device
+   * Update device information
+   */
+  @Post(':deviceId')
+  @UpdateDeviceApiDocs()
+  async updateDevice(
+    @CurrentUser() user: any,
+    @Param('deviceId') deviceId: string,
+    @Body() updateData: Partial<DeviceInfoDto>,
+  ) {
+    return this.deviceService.updateDevice(user.userId, deviceId, updateData);
+  }
+
+  /**
+   * Deactivate device (soft delete)
+   */
+  @Post(':deviceId/deactivate')
+  @DeactivateDeviceApiDocs()
+  async deactivateDevice(
+    @CurrentUser() user: any,
+    @Param('deviceId') deviceId: string,
+  ) {
+    return this.deviceService.deactivateDevice(user.userId, deviceId);
+  }
+
+  /**
+   * Delete device permanently
    */
   @Delete(':deviceId')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({
-    summary: 'Remove device',
-    description: `
-## Remove Device
-
-Deactivate a specific device for the current user.
-
-### Effects:
-- Device is marked as inactive (soft delete)
-- User is logged out from that device
-- Push notifications are disabled
-- Device cannot be used for authentication
-
-### Security:
-- Audit logging for device removal
-- Current device session is terminated
-    `,
-  })
-  @ApiParam({
-    name: 'deviceId',
-    description: 'Device ID to remove',
-    example: 'mobile_device_12345',
-  })
-  @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
-    description: 'Device removed successfully',
-  })
-  @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
-    description: 'Device not found or already inactive',
-    type: ApiErrorResponseDto,
-  })
-  async removeDevice(
+  @DeleteDeviceApiDocs()
+  async deleteDevice(
     @CurrentUser() user: any,
     @Param('deviceId') deviceId: string,
   ) {
     return this.deviceService.removeDevice(user.userId, deviceId);
-  }
-
-  /**
-   * Remove all devices
-   */
-  @Delete()
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({
-    summary: 'Remove all devices',
-    description: `
-## Remove All Devices
-
-Deactivate all devices for the current user (logout from all devices).
-
-### Effects:
-- All user devices are marked as inactive
-- User is logged out from all sessions
-- All push notifications are disabled
-- Forces user to re-authenticate on all devices
-
-### Use Cases:
-- Security incident response
-- Account compromise recovery
-- User-initiated logout from all devices
-    `,
-  })
-  @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
-    description: 'All devices removed successfully',
-  })
-  async removeAllDevices(@CurrentUser() user: any) {
-    return this.deviceService.removeAllDevices(user.userId);
-  }
-
-  /**
-   * Get devices by platform
-   */
-  @Get('platform/:platform')
-  @ApiOperation({
-    summary: 'Get devices by platform',
-    description: 'Retrieve all active devices for a specific platform',
-  })
-  @ApiParam({
-    name: 'platform',
-    description: 'Device platform',
-    enum: ['ios', 'android', 'web', 'windows', 'macos'],
-    example: 'ios',
-  })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Platform devices retrieved successfully',
-    type: [DeviceInfoResponseDto],
-  })
-  async getDevicesByPlatform(
-    @CurrentUser() user: any,
-    @Param('platform') platform: string,
-  ) {
-    return this.deviceService.getDevicesByPlatform(user.userId, platform);
-  }
-
-  /**
-   * Update device last active timestamp
-   */
-  @Post(':deviceId/heartbeat')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Update device heartbeat',
-    description: `
-## Device Heartbeat
-
-Update the last active timestamp for a device.
-
-### Purpose:
-- Track device activity
-- Maintain active session status
-- Enable accurate "last seen" timestamps
-- Support device cleanup policies
-    `,
-  })
-  @ApiParam({
-    name: 'deviceId',
-    description: 'Device ID to update',
-    example: 'mobile_device_12345',
-  })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Device heartbeat updated successfully',
-    example: { message: 'Device activity updated', timestamp: '2024-01-15T10:30:00.000Z' }
-  })
-  @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
-    description: 'Device not found or inactive',
-    type: ApiErrorResponseDto,
-  })
-  async updateDeviceHeartbeat(
-    @CurrentUser() user: any,
-    @Param('deviceId') deviceId: string,
-  ) {
-    await this.deviceService.updateDeviceLastActive(user.userId, deviceId);
-    return {
-      message: 'Device activity updated',
-      timestamp: new Date().toISOString(),
-    };
   }
 }

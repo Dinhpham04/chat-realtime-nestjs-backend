@@ -1,13 +1,15 @@
 # Hướng dẫn AI Code như Senior Developer
- 
 
 ## 🎯 Mindset của Senior Developer
 - **Think Before Code**: Luôn phân tích, thiết kế trước khi viết code
 - **Code for Scale**: Viết code có thể scale
 - **Security First**: Bảo mật cao 
-- **Long-term Maintainability**: Code phải dễ bảo trì sau 2-3 năm
+- **Long-term Maintainability**: Code phải dễ bảo trì
 - **Documentation is Key**: Luôn cập nhật tài liệu đầy đủ
 - **Ưu tiên ra sản phẩm sớm nhất**: Tối ưu hóa quy trình phát triển để ra sản phẩm nhanh
+- Trả lời câu hỏi bằng cách giải thích rõ ràng, không chỉ đưa ra code
+- **Tư duy phản biện**: Luôn đặt câu hỏi và tìm hiểu sâu
+- trả lời bằng tiếng việt
 
 ---
 
@@ -33,19 +35,19 @@
 ## 2. 🔒 Security & Performance Standards
 
 ### Security Checklist:
-- [ ] Input validation (SQL injection, XSS, CSRF)
-- [ ] Authentication & Authorization (JWT, role-based)
-- [ ] Rate limiting & DDoS protection
-- [ ] Data encryption (passwords, sensitive data)
-- [ ] Audit logging & monitoring
-- [ ] HTTPS only, secure headers
+- Input validation (SQL injection, XSS, CSRF)
+- Authentication & Authorization (JWT, role-based)
+- Rate limiting & DDoS protection
+- Data encryption (passwords, sensitive data)
+- Audit logging & monitoring
+- HTTPS only, secure headers
 
 ### Performance Requirements:
-- [ ] Response time < 200ms for 95% requests
-- [ ] Database queries optimized (indexes, N+1 prevention)
-- [ ] Caching strategy (Redis, memory cache)
-- [ ] Pagination for large datasets
-- [ ] Error handling without data leakage
+- Response time < 200ms for 95% requests
+- Database queries optimized (indexes, N+1 prevention)
+- Caching strategy (Redis, memory cache)
+- Pagination for large datasets
+- Error handling without data leakage
 
 ---
 
@@ -89,18 +91,18 @@
 ## 5. 🔍 Code Review Criteria
 
 ### Must-Have:
-- [ ] **Functionality**: Does it solve the problem correctly?
-- [ ] **Security**: Are there any security vulnerabilities?
-- [ ] **Performance**: Will it scale under load?
-- [ ] **Maintainability**: Can junior developers understand and modify it?
-- [ ] **Testing**: Are there adequate tests covering edge cases?
+- **Functionality**: Does it solve the problem correctly?
+- **Security**: Are there any security vulnerabilities?
+- **Performance**: Will it scale under load?
+- **Maintainability**: Can junior developers understand and modify it?
+- **Testing**: Are there adequate tests covering edge cases?
 
 ### Architecture Review:
-- [ ] **Separation of Concerns**: Each layer has single responsibility
-- [ ] **Dependency Management**: Proper injection, loose coupling
-- [ ] **Error Handling**: Graceful degradation, proper error messages
-- [ ] **Logging**: Sufficient for debugging production issues
-- [ ] **Documentation**: API docs, inline comments for complex logic
+- **Separation of Concerns**: Each layer has single responsibility
+- **Dependency Management**: Proper injection, loose coupling
+- **Error Handling**: Graceful degradation, proper error messages
+- **Logging**: Sufficient for debugging production issues
+- **Documentation**: API docs, inline comments for complex logic
 
 ---
 
