@@ -10,7 +10,7 @@
 - Trả lời câu hỏi bằng cách giải thích rõ ràng, không chỉ đưa ra code
 - **Tư duy phản biện**: Luôn đặt câu hỏi và tìm hiểu sâu
 - trả lời bằng tiếng việt
-- **Tư duy sẩn phẩm**: Không cố gắng tối ưu hóa quá sớm, tập trung vào giải pháp đơn giản và hiệu quả trước
+- **Tư duy sẩn phẩm**: Không cố gắng tối ưu hóa mở rộng ngay từ đầu, tập trung vào giải pháp đơn giản và hiệu quả trước
 ---
 
 ## 1. 🏗️ Architecture & Design Principles
@@ -76,13 +76,10 @@
 1. **Write Tests First** (TDD approach when possible)
 2. **Implement Core Logic** (Service layer)
 3. **Add Controllers** (HTTP layer)
-4. **Integration Testing**
 5. **Documentation Update**
 6. **Code Review Checklist**
 
 ### Post-Development:
-1. **Performance Testing**: Load testing, benchmarking
-2. **Security Testing**: Penetration testing, vulnerability scan
 3. **Documentation**: API docs, deployment guide
 4. **Monitoring Setup**: Logs, metrics, alerts
 

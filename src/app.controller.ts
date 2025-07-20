@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, BadRequestException } from '@nestjs/common';
 import { AppService } from './app.service';
 import { Public, CurrentUser, JwtUser } from './shared';
 
@@ -40,5 +40,27 @@ export class AppController {
         timestamp: new Date().toISOString(),
       },
     };
+  }
+
+  @Public()
+  @Get('test-error')
+  testError() {
+    throw new BadRequestException('This is a test error message from Global Exception Filter');
+  }
+
+  @Public()
+  @Get('test-error-with-stack')
+  testErrorWithStack() {
+    // Simulate error trong nested function call để test stack trace
+    this.simulateDeepError();
+  }
+
+  private simulateDeepError() {
+    this.anotherFunction();
+  }
+
+  private anotherFunction() {
+    // This will throw error at line ~XX in app.controller.ts
+    throw new BadRequestException('Error with detailed stack trace for line number testing');
   }
 }

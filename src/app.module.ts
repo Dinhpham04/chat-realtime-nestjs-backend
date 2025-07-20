@@ -13,10 +13,10 @@ import { AuthModule } from './modules/auth/auth.module';
 // Import shared components
 import {
   GlobalExceptionFilter,
-  JwtAuthGuard,
   LoggingInterceptor,
   RequestIdMiddleware,
 } from './shared';
+import { FriendsModule } from './modules/friends/friends.module';
 
 @Module({
   imports: [
@@ -37,6 +37,7 @@ import {
     RedisModule,
     UsersModule,
     AuthModule,
+    FriendsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -49,11 +50,6 @@ import {
     // {
     //   provide: APP_FILTER,
     //   useClass: JwtAuthExceptionFilter,
-    // },
-    // // Global Guards
-    // {
-    //   provide: APP_GUARD,
-    //   useClass: JwtAuthGuard,
     // },
     // Global Interceptors
     {

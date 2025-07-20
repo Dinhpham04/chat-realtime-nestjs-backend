@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { setupSwagger } from './shared/utils/swagger/setupSwagger';
+import { GlobalExceptionFilter } from './shared/filters/global-exception.filter';
 
 /**
  * Bootstrap function - Application entry point
@@ -27,6 +28,9 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Global exception filter - Senior Level Error Handling
+  app.useGlobalFilters(new GlobalExceptionFilter());
 
   // CORS
   app.enableCors({

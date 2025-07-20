@@ -53,7 +53,7 @@ export class UsersRepository implements IUsersRepository {
   async findByPhoneNumber(phoneNumber: string): Promise<UserDocument | null> {
     try {
       return await this.userModel
-        .findOne({ phoneNumber })
+        .findOne({ phoneNumber: phoneNumber })
         .exec();
     } catch (error) {
       this.logger.error(`Failed to find user by phone number ${phoneNumber}: ${error.message}`);

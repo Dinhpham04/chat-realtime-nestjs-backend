@@ -389,4 +389,71 @@ export class RedisCacheService {
       };
     }
   }
+
+  // =============================================
+  // Generic Cache Methods for Friends Module
+  // =============================================
+
+  /**
+   * Set cache with expiration
+   */
+  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    if (ttlSeconds) {
+      await this.redis.setex(key, ttlSeconds, value);
+    } else {
+      await this.redis.set(key, value);
+    }
+  }
+
+  /**
+   * Get cache value
+   */
+  async get(key: string): Promise<string | null> {
+    return await this.redis.get(key);
+  }
+
+  /**
+   * Delete cache key
+   */
+  async del(key: string): Promise<void> {
+    await this.redis.del(key);
+  }
+
+  /**
+   * Check if user is online via Redis
+   */
+  async isUserOnline(userId: string): Promise<boolean> {
+    const sessionKey = `user:${userId}:sessions`;
+    const sessions = await this.redis.hgetall(sessionKey);
+    return Object.keys(sessions).length > 0;
+  }
+
+  /**
+   * Set user online status
+   */
+  async setUserOnline(userId: string, socketId: string): Promise<void> {
+    const sessionKey = `user:${userId}:sessions`;
+    const onlineKey = `user:${userId}:online`;
+
+    await this.redis.hset(sessionKey, socketId, Date.now().toString());
+    await this.redis.set(onlineKey, 'true', 'EX', 300); // 5 minutes TTL
+  }
+
+  /**
+   * Set user offline
+   */
+  async setUserOffline(userId: string, socketId?: string): Promise<void> {
+    const sessionKey = `user:${userId}:sessions`;
+    const onlineKey = `user:${userId}:online`;
+
+    if (socketId) {
+      await this.redis.hdel(sessionKey, socketId);
+    }
+
+    // Check if any sessions remain
+    const remainingSessions = await this.redis.hgetall(sessionKey);
+    if (Object.keys(remainingSessions).length === 0) {
+      await this.redis.del(onlineKey);
+    }
+  }
 }

@@ -26,8 +26,10 @@ export class AuthService {
   private readonly lockoutDuration = 15 * 60 * 1000; // 15 minutes
 
   constructor(
-    @Inject('IAuthRepository') private readonly authRepository: IAuthRepository,
-    @Inject('IUsersRepository') private readonly usersRepository: IUsersRepository,
+    @Inject('IAuthRepository')
+    private readonly authRepository: IAuthRepository,
+    @Inject('IUsersRepository')
+    private readonly usersRepository: IUsersRepository,
     private readonly tokenService: TokenService,
     private readonly deviceService: DeviceService,
     private readonly realTimeStateService: RealTimeStateService,
@@ -253,6 +255,7 @@ export class AuthService {
     return {
       user: {
         id: userCore._id.toString(),
+        fullName: userCore.fullName,
         phoneNumber: userCore.phoneNumber,
         isActive: userCore.status === UserStatus.ACTIVE,
         createdAt: userCore.createdAt || new Date(),

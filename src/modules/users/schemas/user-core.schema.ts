@@ -11,7 +11,7 @@ export type UserDocument = UserCore & Document;
  */
 @Schema({
   timestamps: true,
-  collection: 'users',
+  collection: 'users_core',
 })
 export class UserCore {
   // Identity - Required for authentication
@@ -168,8 +168,6 @@ export const UserCoreSchema = SchemaFactory.createForClass(UserCore);
 
 // Essential indexes only
 UserCoreSchema.index({ phoneNumber: 1 }); // Primary
-UserCoreSchema.index({ email: 1 }, { sparse: true });
-UserCoreSchema.index({ username: 1 }, { sparse: true });
 UserCoreSchema.index({ status: 1 });
 UserCoreSchema.index({ friends: 1 });
 UserCoreSchema.index({ isDeleted: 1 });

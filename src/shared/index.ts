@@ -6,7 +6,6 @@
 export * from './filters/global-exception.filter';
 
 // Guards
-export * from './guards/jwt-auth.guard';
 
 // Decorators
 export * from './decorators/public.decorator';

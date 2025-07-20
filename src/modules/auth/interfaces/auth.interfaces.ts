@@ -42,6 +42,7 @@ export interface AuthResponse {
   user: {
     id: string;
     phoneNumber: string;
+    fullName?: string;
     isActive: boolean;
     createdAt: Date;
   };
