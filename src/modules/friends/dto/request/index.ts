@@ -8,3 +8,4 @@ export * from './search-users.dto';
 export * from './import-contacts.dto';
 export * from './contact-sync.dto';
 export * from './get-registered-contacts.dto';
+export * from './find-registered-contacts.dto';

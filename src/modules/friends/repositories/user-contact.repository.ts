@@ -6,11 +6,6 @@ import { IUserContactRepository } from '../types';
 
 /**
  * UserContactRepository - MVP Implementation
- * 
- * 🎯 Purpose: Data access layer cho contact sync & discovery
- * 📱 Mobile-First: Bulk operations cho contact import
- * 🚀 Clean Architecture: Repository pattern với interface abstraction
- * 
  * Features:
  * - Bulk contact import (1000+ contacts)
  * - Phone number discovery & mapping
@@ -151,7 +146,9 @@ export class UserContactRepository implements IUserContactRepository {
                     {
                         registeredUserId: new Types.ObjectId(registeredUserId),
                         isRegistered: true,
-                        registeredAt: new Date()
+                        registeredAt: new Date(),
+                        autoFriended: true,
+                        autoFriendedAt: new Date(),
                     },
                     { new: true }
                 )

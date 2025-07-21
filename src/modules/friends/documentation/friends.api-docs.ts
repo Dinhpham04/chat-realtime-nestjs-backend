@@ -97,18 +97,6 @@ Sends a friend request to another user by phone number or user ID.
 - Target user must exist and be active
 - Maximum 50 pending outgoing requests per user
 - Blocked users cannot send/receive requests
-
-### Mobile-First Features:
-- Immediate status feedback
-- Duplicate request prevention
-- Bulk request capabilities
-- Offline support with sync
-
-### Security:
-- JWT authentication required
-- Rate limiting: 20 requests per minute
-- Input validation and sanitization
-- Audit logging for security monitoring
             `,
         }),
         ApiBody({
@@ -179,12 +167,6 @@ Accept or decline an incoming friend request.
 - Request must be in PENDING status
 - Accepting creates bidirectional friendship
 - Declining removes the request permanently
-
-### Mobile-First Features:
-- Instant response feedback
-- Optimistic UI updates
-- Batch response capabilities
-- Push notifications to requester
             `,
         }),
         ApiParam({
@@ -263,19 +245,6 @@ Intelligent search that automatically detects input type and searches accordingl
   - \`Nguyen Van A\`
   - \`john doe\`
   - \`Mary Jane\`
-
-### Features:
-- **Auto-detection**: No need to specify search type
-- **Exclude friends**: Won't show existing friends
-- **Pending status**: Shows if friend request already sent
-- **Mobile optimized**: Fast search with pagination
-- **Security**: Input sanitization and validation
-
-### Response includes:
-- User basic info (name, avatar, phone)
-- Friend status (isFriend, hasPendingRequest)
-- Online status and last seen
-- Mutual friends count
             `,
         }),
         ApiQuery({
@@ -327,19 +296,6 @@ export function GetFriendsListApiDocs() {
 ## Get Friends List with Enhanced Features
 
 Retrieve paginated list of user's friends with bidirectional friendship support, Redis caching, and online status filtering.
-
-### Key Enhancements:
-- **Bidirectional Friendship**: Supports both userId and friendId relationships
-- **Redis Caching**: 5-minute cache for unfiltered requests
-- **Real-time Online Status**: Updated from Redis with WebSocket integration
-- **Performance Optimized**: Aggregation pipeline with caching strategy
-
-### Mobile-First Features:
-- Optimized pagination for mobile
-- Search by name or phone
-- Online/offline status filtering
-- Cached responses for performance
-
 ### Search & Filter:
 - Search by name or phone number
 - Filter by online status (true=online only, false=offline only, undefined=all)
@@ -435,12 +391,6 @@ Retrieve friend requests with advanced filtering and pagination support.
 - **status**: Filter by status (PENDING/ACCEPTED/DECLINED)
 - **limit**: Number of requests to return (1-100, default: 20)
 - **offset**: Number of requests to skip (default: 0)
-
-### Mobile Features:
-- Comprehensive filtering by type and status
-- Pagination for large request lists
-- Request metadata (timestamps, messages, user info)
-- Optimized for mobile performance
             `,
         }),
         ApiQuery({
@@ -521,11 +471,6 @@ export function RemoveFriendApiDocs() {
 ## Remove Friend
 
 Remove a user from your friends list. This action is permanent.
-
-### Mobile Features:
-- Immediate friend list updates
-- Confirmation before removal
-- Audit trail maintenance
             `,
         }),
         ApiResponse({
@@ -553,12 +498,6 @@ export function BlockUserApiDocs() {
 ## Block User
 
 Block a user to prevent them from sending messages or friend requests.
-
-### Privacy Features:
-- Prevents all future contact attempts
-- Removes from friends list if applicable
-- Optional reason for blocking
-- Reversible action
             `,
         }),
         ApiResponse({
@@ -588,11 +527,6 @@ export function UnblockUserApiDocs() {
 ## Unblock User
 
 Remove a user from your blocked list, allowing them to contact you again.
-
-### Privacy Features:
-- Restores normal contact permissions
-- User can send friend requests again
-- Audit trail maintained
             `,
         }),
         ApiResponse({
@@ -627,12 +561,6 @@ Check the detailed relationship status with another user.
 - **PENDING_INCOMING**: Friend request received (can accept/decline)
 - **BLOCKED**: User is blocked (no interaction allowed)
 - **NONE**: No relationship (can send friend request)
-
-### Mobile Features:
-- Detailed status with permissions
-- Pending request information
-- Friendship date tracking
-- Message and request capabilities
             `,
         }),
         ApiParam({
