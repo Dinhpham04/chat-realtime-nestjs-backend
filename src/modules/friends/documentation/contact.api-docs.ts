@@ -80,59 +80,59 @@ export function BulkContactImportApiDocs() {
 ## Bulk Contact Import
 
 Import up to 1000 contacts from user's mobile device in a single request.
-
-### Mobile-First Features:
-- High-performance bulk processing
-- Duplicate detection and merging
-- Privacy-focused (hashed phone numbers)
-- Optimized for mobile bandwidth
-- Background processing support
-
-### Business Rules:
-- Maximum 1000 contacts per request
-- Automatic duplicate detection
-- Phone number validation and formatting
-- Privacy compliance (contact data encrypted)
-- Rate limiting: 5 requests per hour
-
-### Processing Features:
-- Batch validation and sanitization
-- Incremental updates for existing contacts
-- Failed contact error reporting
-- Transaction safety for data integrity
             `,
         }),
         ApiBody({
-            description: 'Bulk contact import data',
+            description: 'Bulk contact import data with mobile device context',
             examples: {
                 'Mobile Contacts': {
-                    summary: 'Import from mobile phone book',
+                    summary: 'Import from mobile phone book with device context',
                     value: {
                         contacts: [
                             {
                                 phoneNumber: '+84901234567',
-                                displayName: 'Nguyen Van A',
-                                firstName: 'Nguyen Van',
-                                lastName: 'A',
-                                isBlocked: false
+                                contactName: 'Nguyen Van A',
+                                contactSource: 'phonebook',
+                                // networkType: 'wifi'
                             },
                             {
                                 phoneNumber: '+84987654321',
-                                displayName: 'Tran Thi B',
-                                firstName: 'Tran Thi',
-                                lastName: 'B',
-                                isBlocked: false
+                                contactName: 'Tran Thi B',
+                                contactSource: 'phonebook',
+                                // networkType: '4g'
                             }
                         ],
-                        deviceContactsHash: 'sha256_hash_of_all_contacts',
-                        totalContactsOnDevice: 150
+                        autoFriend: true,
+                        // deviceContactsHash: 'sha256_hash_of_all_contacts',
+                        // totalContactsOnDevice: 150,
+                        // platform: 'ios',
+                        // batteryLevel: 85,
+                        // networkType: 'wifi',
+                        // lowDataMode: false
+                    }
+                },
+                'Low Data Mode': {
+                    summary: 'Import with low data mode optimization',
+                    value: {
+                        contacts: [
+                            {
+                                phoneNumber: '+84901234567',
+                                contactName: 'Nguyen Van A',
+                                contactSource: 'PHONEBOOK'
+                            }
+                        ],
+                        autoFriend: true,
+                        platform: 'android',
+                        batteryLevel: 15,
+                        networkType: '3g',
+                        lowDataMode: true
                     }
                 }
             }
         }),
         ApiResponse({
             status: HttpStatus.CREATED,
-            description: 'Contacts imported successfully',
+            description: 'Contacts imported successfully with mobile optimization',
             example: {
                 imported: 148,
                 updated: 2,
@@ -148,7 +148,14 @@ Import up to 1000 contacts from user's mobile device in a single request.
                     }
                 ],
                 failedContacts: [],
-                processingTimeMs: 2341
+                processingTimeMs: 2341,
+                duplicates: 5,
+                errors: [],
+                optimization: {
+                    lowDataMode: false,
+                    networkOptimized: 'high',
+                    batteryImpact: 'normal'
+                }
             }
         }),
         ApiResponse(commonErrorResponses.badRequest),
@@ -168,21 +175,7 @@ export function FindRegisteredContactsApiDocs() {
             summary: 'Find which contacts are registered on platform',
             description: `
 ## Find Registered Contacts
-
 Check which contacts from user's phone book are registered on the platform.
-
-### Mobile-First Features:
-- Fast discovery of platform users
-- Privacy-safe contact matching
-- Batch processing for efficiency
-- Cached results for performance
-
-### Privacy & Security:
-- Phone number hashing for privacy
-- No contact data stored on server
-- GDPR compliant processing
-- Secure matching algorithms
-
 ### Use Cases:
 - Friend suggestion system
 - Quick user discovery
@@ -234,7 +227,81 @@ Check which contacts from user's phone book are registered on the platform.
 }
 
 /**
- * Import Contacts endpoint documentation
+ * Get Registered Contacts endpoint documentation (Paginated version)
+ */
+export function GetRegisteredContactsApiDocs() {
+    return applyDecorators(
+        ApiBearerAuth('JWT'),
+        ApiOperation({
+            summary: 'Get paginated list of registered contacts',
+            description: `
+## Get Registered Contacts (Paginated)
+
+Get a paginated list of user's contacts that are registered on the platform.
+
+### Query Parameters:
+- limit: Maximum contacts per page (1-100)
+- offset: Skip number of contacts  
+- includeAlreadyFriends: Include existing friends
+            `,
+        }),
+        ApiQuery({
+            name: 'limit',
+            required: false,
+            type: Number,
+            description: 'Maximum number of contacts to return (1-100)',
+            example: 50
+        }),
+        ApiQuery({
+            name: 'offset',
+            required: false,
+            type: Number,
+            description: 'Number of contacts to skip',
+            example: 0
+        }),
+        ApiQuery({
+            name: 'includeAlreadyFriends',
+            required: false,
+            type: Boolean,
+            description: 'Include contacts who are already friends',
+            example: false
+        }),
+        ApiResponse({
+            status: HttpStatus.OK,
+            description: 'Registered contacts retrieved successfully',
+            example: {
+                contacts: [
+                    {
+                        phoneNumber: '+84901234567',
+                        contactName: 'Nguyen Van A',
+                        user: {
+                            id: '507f1f77bcf86cd799439011',
+                            fullName: 'Nguyen Van A',
+                            avatarUrl: 'https://example.com/avatar1.jpg',
+                            isOnline: true
+                        },
+                        isAlreadyFriend: false
+                    }
+                ],
+                total: 23,
+                limit: 50,
+                offset: 0,
+                hasMore: false,
+                stats: {
+                    totalContacts: 150,
+                    registeredCount: 23,
+                    availableToFriend: 18
+                }
+            }
+        }),
+        ApiResponse(commonErrorResponses.badRequest),
+        ApiResponse(commonErrorResponses.unauthorized),
+        ApiResponse(commonErrorResponses.tooManyRequests),
+    );
+}
+
+/**
+ * Get Registered Contacts endpoint documentation (DEPRECATED - use find-registered instead)
  */
 export function ImportContactsApiDocs() {
     return applyDecorators(
@@ -245,18 +312,6 @@ export function ImportContactsApiDocs() {
 ## Import Contacts
 
 Import contacts from user's mobile device for friend suggestions.
-
-### Mobile-First Features:
-- Optimized for mobile contact sync
-- Privacy-focused processing
-- Efficient bulk operations
-- Background processing support
-
-### Privacy Features:
-- Local contact data processing
-- No permanent storage of contact details
-- GDPR compliant operations
-- User consent required
             `,
         }),
         ApiBody({
@@ -303,14 +358,7 @@ export function DeleteContactApiDocs() {
             summary: 'Delete a specific contact',
             description: `
 ## Delete Contact
-
 Remove a specific contact from user's imported contacts.
-
-### Privacy Features:
-- Individual contact removal
-- Data protection compliance
-- Audit trail maintenance
-- Reversible operation
             `,
         }),
         ApiResponse({
@@ -334,13 +382,6 @@ export function ContactSyncApiDocs() {
 ## Contact Sync
 
 Synchronize contacts with server for updates and newly registered users.
-
-### Sync Features:
-- Incremental sync capability
-- New user registration detection
-- Auto-friend functionality
-- Batch processing optimization
-- Update existing contacts
             `,
         }),
         ApiConsumes('application/json'),
@@ -418,13 +459,6 @@ export function GetContactStatsApiDocs() {
 ## Contact Statistics
 
 Retrieve comprehensive statistics about user's imported contacts.
-
-### Analytics Features:
-- Total contacts imported
-- Registered vs unregistered breakdown
-- Auto-friend success rate
-- Growth insights
-- Contact source analysis
             `,
         }),
         ApiResponse({
@@ -464,23 +498,6 @@ export function DeleteAllContactsApiDocs() {
 ## Delete All Contacts
 
 Remove all imported contacts for privacy or cleanup purposes.
-
-### Enhanced Features:
-- Batch deletion with performance optimization
-- Comprehensive error reporting
-- Detailed deletion statistics
-- Success rate tracking
-
-### Privacy Features:
-- Complete data removal
-- GDPR compliance
-- Audit trail maintenance
-- Irreversible operation warning
-
-### Performance:
-- Single database operation
-- Bulk processing optimization
-- Error isolation and reporting
             `,
         }),
         ApiResponse({

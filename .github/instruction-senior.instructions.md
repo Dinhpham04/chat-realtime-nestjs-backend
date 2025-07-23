@@ -1,5 +1,7 @@
 # Hướng dẫn AI Code như Senior Developer
 
+**Mobile-First**
+
 ## 🎯 Mindset của Senior Developer
 - **Think Before Code**: Luôn phân tích, thiết kế trước khi viết code
 - **Code for Scale**: Viết code có thể scale

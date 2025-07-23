@@ -232,7 +232,7 @@ export interface IContactSyncService {
         newRegisteredContacts: RegisteredContact[];
         errors: string[];
     }>;
-    findRegisteredContacts(phoneNumbers: string[]): Promise<RegisteredContact[]>;
+    findRegisteredContacts(phoneNumbers: string[], requestingUserId?: string): Promise<RegisteredContact[]>;
     autoFriendRegisteredContact(userId: string, registeredUserId: string): Promise<boolean>;
     getContactStats(userId: string): Promise<{
         total: number;

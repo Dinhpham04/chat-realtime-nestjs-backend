@@ -43,6 +43,11 @@ import { RedisCacheService } from '../../../redis/services/redis-cache.service';
  * - Comprehensive error handling
  * - Mobile-first design with E.164 phone format
  */
+
+const BULK_IMPORT = {
+    MAX_CONTACTS: 1000,
+    MAX_COUNT_PER_HOUR: 50
+}
 @Injectable()
 export class ContactSyncService implements IContactSyncService {
     private readonly logger = new Logger(ContactSyncService.name);
@@ -59,10 +64,18 @@ export class ContactSyncService implements IContactSyncService {
 
     /**
      * Import contacts from mobile phone (Bulk operation)
+     * Enhanced with Mobile-First features
      */
-    async importContacts(params: ContactSyncParams): Promise<ContactSyncResult> {
+    async importContacts(params: ContactSyncParams & {
+        deviceContext?: {
+            platform?: string;
+            batteryLevel?: number;
+            networkType?: string;
+            lowDataMode?: boolean;
+        };
+    }): Promise<ContactSyncResult> {
         try {
-            const { userId, contacts, autoFriend = true } = params;
+            const { userId, contacts, autoFriend = true, deviceContext } = params;
 
             if (!Types.ObjectId.isValid(userId)) {
                 throw new BadRequestException('Invalid user ID');
@@ -72,14 +85,31 @@ export class ContactSyncService implements IContactSyncService {
                 throw new BadRequestException('No contacts to import');
             }
 
-            this.logger.log(`Starting contact import for user ${userId}: ${contacts.length} contacts`);
+            // Mobile-First: Check rate limiting (5 requests per hour per user)
+            const rateLimitKey = `contact_import:${userId}`;
+            const currentRequests = Number(await this.cacheService.get(rateLimitKey) || 0);
+            if (currentRequests >= BULK_IMPORT.MAX_COUNT_PER_HOUR) {
+                throw new BadRequestException(`Rate limit exceeded. Maximum ${BULK_IMPORT.MAX_COUNT_PER_HOUR} imports per hour.`);
+            }
+
+            // Mobile-First: Optimize for low data mode
+            const batchSize = deviceContext?.lowDataMode ? 25 : 50;
+            const maxContacts = deviceContext?.lowDataMode || BULK_IMPORT.MAX_CONTACTS ? 500 : 1000;
+
+            if (contacts.length > maxContacts) {
+                throw new BadRequestException(`Too many contacts. Maximum ${maxContacts} contacts allowed.`);
+            }
+
+            this.logger.log(`Starting contact import for user ${userId}: ${contacts.length} contacts, device: ${deviceContext?.platform || 'unknown'}, network: ${deviceContext?.networkType || 'unknown'}`);
+
+            // Update rate limit
+            await this.cacheService.set(rateLimitKey, String(currentRequests + 1), 3600); // 1 hour TTL
 
             // Validate và clean contacts data
             const validContacts = await this.validateAndCleanContacts(userId, contacts);
             let imported = 0;
             let duplicates = 0;
             const errors: string[] = [];
-
             // Prepare contacts for bulk insert
             const contactsToInsert = validContacts.map(contact => ({
                 userId: new Types.ObjectId(userId),
@@ -88,13 +118,18 @@ export class ContactSyncService implements IContactSyncService {
                 contactSource: contact.contactSource || ContactSource.PHONEBOOK,
                 autoFriendWhenRegisters: autoFriend,
                 lastSyncAt: new Date(),
-            }));
+            }))
 
             // Bulk insert contacts
             try {
                 const insertedContacts = await this.userContactRepository.bulkCreate(contactsToInsert);
                 imported = insertedContacts.length;
                 duplicates = contactsToInsert.length - imported;
+
+                // ✅ CRITICAL FIX: Auto-update registration status for newly imported contacts
+                if (insertedContacts.length > 0) {
+                    await this.updateRegistrationStatusForNewContacts(insertedContacts);
+                }
             } catch (error) {
                 this.logger.error(`Bulk insert failed: ${error.message}`);
                 errors.push('Failed to import some contacts due to duplicates');
@@ -104,8 +139,7 @@ export class ContactSyncService implements IContactSyncService {
 
             // Find registered users among imported contacts
             const phoneNumbers = validContacts.map(c => this.normalizePhoneNumber(c.phoneNumber));
-            const registeredContacts = await this.findRegisteredContacts(phoneNumbers);
-
+            const registeredContacts = await this.findRegisteredContacts(phoneNumbers, userId);
             // Auto-friend registered contacts if enabled
             const newFriends: UserSummary[] = [];
             if (autoFriend && registeredContacts.length > 0) {
@@ -160,7 +194,7 @@ export class ContactSyncService implements IContactSyncService {
      * - Real-time online status from cache
      * - Comprehensive error handling
      */
-    async findRegisteredContacts(phoneNumbers: string[]): Promise<RegisteredContact[]> {
+    async findRegisteredContacts(phoneNumbers: string[], requestingUserId?: string): Promise<RegisteredContact[]> {
         try {
             if (phoneNumbers.length === 0) {
                 return [];
@@ -185,8 +219,11 @@ export class ContactSyncService implements IContactSyncService {
                 const contact = contactMap.get(user.phoneNumber);
                 if (!contact) continue;
 
-                // Check if already friends
-                const isAlreadyFriend = await this.checkIfAlreadyFriends(contact.userId.toString(), user.id);
+                // Check if already friends (only if requestingUserId is provided)
+                let isAlreadyFriend = false;
+                if (requestingUserId) {
+                    isAlreadyFriend = await this.checkIfAlreadyFriends(requestingUserId, user.id);
+                }
 
                 // Get online status from cache
                 const isOnline = await this.getUserOnlineStatus(user.id);
@@ -332,6 +369,90 @@ export class ContactSyncService implements IContactSyncService {
         } catch (error) {
             this.logger.error(`Failed to get contact stats: ${error.message}`);
             return { total: 0, registered: 0, autoFriended: 0 };
+        }
+    }
+
+    /**
+     * Get enhanced contact statistics with breakdown - Controller uses this  
+     * 
+     * Following instruction-senior.md:
+     * - Single Responsibility: Enhanced stats separate from basic stats
+     * - Performance: Efficient aggregation queries
+     * - Mobile-optimized: Include growth metrics
+     */
+    async getEnhancedContactStats(userId: string): Promise<{
+        totalContacts: number;
+        registeredContacts: number;
+        unregisteredContacts: number;
+        autoFriendedCount: number;
+        contactSources: {
+            PHONEBOOK: number;
+            MANUAL: number;
+        };
+        lastSyncAt: string;
+    }> {
+        try {
+            if (!Types.ObjectId.isValid(userId)) {
+                return {
+                    totalContacts: 0,
+                    registeredContacts: 0,
+                    unregisteredContacts: 0,
+                    autoFriendedCount: 0,
+                    contactSources: { PHONEBOOK: 0, MANUAL: 0 },
+                    lastSyncAt: new Date().toISOString()
+                };
+            }
+
+            const basicStats = await this.userContactRepository.getContactStats(userId);
+
+            // Get user contacts for source analysis and last sync time
+            const userContacts = await this.userContactRepository.findByUserId(userId);
+
+            // Calculate contact sources
+            const contactSources = {
+                PHONEBOOK: 0,
+                MANUAL: 0
+            };
+
+            let lastSyncAt = new Date().toISOString();
+            let maxSyncTime = new Date(0);
+
+            userContacts.forEach(contact => {
+                // Count by source
+                if (contact.contactSource === 'manual') {
+                    contactSources.MANUAL++;
+                } else {
+                    contactSources.PHONEBOOK++;
+                }
+
+                // Find latest sync time
+                if (contact.lastSyncAt && contact.lastSyncAt > maxSyncTime) {
+                    maxSyncTime = contact.lastSyncAt;
+                }
+            });
+
+            if (maxSyncTime > new Date(0)) {
+                lastSyncAt = maxSyncTime.toISOString();
+            }
+
+            return {
+                totalContacts: basicStats.total,
+                registeredContacts: basicStats.registered,
+                unregisteredContacts: basicStats.total - basicStats.registered,
+                autoFriendedCount: basicStats.autoFriended,
+                contactSources,
+                lastSyncAt
+            };
+        } catch (error) {
+            this.logger.error(`Failed to get enhanced contact stats: ${error.message}`);
+            return {
+                totalContacts: 0,
+                registeredContacts: 0,
+                unregisteredContacts: 0,
+                autoFriendedCount: 0,
+                contactSources: { PHONEBOOK: 0, MANUAL: 0 },
+                lastSyncAt: new Date().toISOString()
+            };
         }
     }
 
@@ -501,11 +622,59 @@ export class ContactSyncService implements IContactSyncService {
     }
 
     /**
+     * Helper: Update registration status for newly imported contacts
+     * 
+     * Following instruction-senior.md:
+     * - Performance: Bulk operations instead of individual updates
+     * - Single Responsibility: Handle registration status updates
+     * - Security: Validate user existence
+     */
+    private async updateRegistrationStatusForNewContacts(contacts: any[]): Promise<void> {
+        try {
+            if (!contacts || contacts.length === 0) {
+                return;
+            }
+
+            // Extract phone numbers from inserted contacts
+            const phoneNumbers = contacts.map(contact => contact.phoneNumber);
+
+            // Find users who are registered with these phone numbers
+            const registeredUsers = await this.findUsersByPhoneNumbers(phoneNumbers);
+
+            if (registeredUsers.length === 0) {
+                return;
+            }
+
+            this.logger.log(`Updating registration status for ${registeredUsers.length} contacts`);
+
+            // Update registration status in batch
+            for (const user of registeredUsers) {
+                const contact = contacts.find(c => c.phoneNumber === user.phoneNumber);
+                if (contact) {
+                    try {
+                        await this.userContactRepository.updateRegistrationStatus(
+                            contact._id?.toString() || contact.id,
+                            user.id
+                        );
+                        this.logger.debug(`Updated registration status for contact ${contact.contactName} → User ${user.fullName}`);
+                    } catch (error) {
+                        this.logger.warn(`Failed to update registration status for contact ${contact.contactName}: ${error.message}`);
+                    }
+                }
+            }
+        } catch (error) {
+            this.logger.error(`Failed to update registration status for contacts: ${error.message}`);
+            // Don't throw - this is optimization, not critical
+        }
+    }
+
+    /**
      * Helper: Validate và clean contacts data
      */
     private async validateAndCleanContacts(userId: string, contacts: ContactImport[]): Promise<ContactImport[]> {
         const validContacts: ContactImport[] = [];
         const phoneRegex = /^\+?[1-9]\d{1,14}$/; // E.164 format
+
 
         for (const contact of contacts) {
             // Skip if missing required fields
@@ -524,6 +693,9 @@ export class ContactSyncService implements IContactSyncService {
             if (exists) {
                 continue;
             }
+
+
+
 
             validContacts.push({
                 phoneNumber: normalizedPhone,

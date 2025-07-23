@@ -1,5 +1,5 @@
 import { IsOptional, IsNumber, IsBoolean, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -39,7 +39,7 @@ export class GetRegisteredContactsDto {
         example: false
     })
     @IsOptional()
-    @Type(() => Boolean)
+    @Transform(({ value }) => value === 'true' || value === true)
     @IsBoolean()
     includeAlreadyFriends?: boolean = false;
 }

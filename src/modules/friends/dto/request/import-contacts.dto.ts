@@ -1,4 +1,4 @@
-import { IsArray, IsOptional, IsBoolean, ValidateNested, ArrayMaxSize, IsString, IsNotEmpty, IsPhoneNumber, IsEnum, MaxLength } from 'class-validator';
+import { IsArray, IsOptional, IsBoolean, ValidateNested, ArrayMaxSize, IsString, IsNotEmpty, IsPhoneNumber, IsEnum, IsNumber, MaxLength, Min, IsIn, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ContactSource } from '../../types';
@@ -12,8 +12,9 @@ import { ContactSource } from '../../types';
  */
 export class ContactImportItemDto {
     @ApiProperty({
-        description: 'Contact phone number',
-        example: '+84901234567'
+        description: 'Contact phone number in international format',
+        example: '+84901234567',
+        pattern: '^\\+?[1-9]\\d{1,14}$'
     })
     @IsPhoneNumber()
     phoneNumber: string;
@@ -36,13 +37,22 @@ export class ContactImportItemDto {
     @IsOptional()
     @IsEnum(ContactSource)
     contactSource?: ContactSource;
+
+    @ApiPropertyOptional({
+        description: 'Device network type when importing',
+        enum: ['wifi', '4g', '5g', '3g', 'offline'],
+        example: 'wifi'
+    })
+    @IsOptional()
+    @IsIn(['wifi', '4g', '5g', '3g', 'offline'])
+    networkType?: string;
 }
 
 /**
  * ImportContactsDto - Bulk contact import validation
  * 
  * 🎯 Purpose: Validate bulk contact import data
- * 📱 Mobile-First: Support 1000+ contacts import
+ * 📱 Mobile-First: Support 1000+ contacts import with device context
  * 🚀 Single Responsibility: Only contact import validation
  */
 export class ImportContactsDto {
@@ -65,4 +75,65 @@ export class ImportContactsDto {
     @Type(() => Boolean)
     @IsBoolean()
     autoFriend?: boolean = true;
+
+    @ApiPropertyOptional({
+        description: 'SHA256 hash of all contacts on device for sync verification',
+        example: 'a1b2c3d4e5f6...',
+        maxLength: 64
+    })
+    @IsOptional()
+    @IsString()
+    @MaxLength(64)
+    deviceContactsHash?: string;
+
+    @ApiPropertyOptional({
+        description: 'Total number of contacts on user device',
+        example: 150,
+        minimum: 0
+    })
+    @IsOptional()
+    @Type(() => Number)
+    @IsNumber()
+    @Min(0)
+    totalContactsOnDevice?: number;
+
+    @ApiPropertyOptional({
+        description: 'Device platform',
+        enum: ['ios', 'android', 'web'],
+        example: 'ios'
+    })
+    @IsOptional()
+    @IsIn(['ios', 'android', 'web'])
+    platform?: string;
+
+    @ApiPropertyOptional({
+        description: 'Device battery level (0-100)',
+        example: 85,
+        minimum: 0,
+        maximum: 100
+    })
+    @IsOptional()
+    @Type(() => Number)
+    @IsNumber()
+    @Min(0)
+    @Max(100)
+    batteryLevel?: number;
+
+    @ApiPropertyOptional({
+        description: 'Network type during import',
+        enum: ['wifi', '4g', '5g', '3g', 'offline'],
+        example: 'wifi'
+    })
+    @IsOptional()
+    @IsIn(['wifi', '4g', '5g', '3g', 'offline'])
+    networkType?: string;
+
+    @ApiPropertyOptional({
+        description: 'Enable low data mode optimization',
+        example: false
+    })
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    lowDataMode?: boolean = false;
 }
