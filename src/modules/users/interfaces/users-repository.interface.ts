@@ -5,6 +5,7 @@ export interface IUsersRepository {
   // Basic CRUD 
   create(userData: Partial<UserCore>): Promise<UserDocument>;
   findById(id: string): Promise<UserDocument | null>;
+  findByIds(ids: string[]): Promise<UserDocument[]>; // For bulk operations
   findByEmail(email: string): Promise<UserDocument | null>;
   findByPhoneNumber(phoneNumber: string): Promise<UserDocument | null>;
   updateById(id: string, updateData: Partial<UserCore>): Promise<UserDocument | null>;

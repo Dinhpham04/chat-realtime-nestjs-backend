@@ -15,25 +15,6 @@ export function setupSwagger(app: any, apiPrefix: string): void {
     .setDescription(`
 # Real-time Messaging Application API
 
-## 🎯 Features
-- **Authentication & Authorization**: JWT-based with refresh tokens
-- **Real-time Messaging**: WebSocket support for instant communication
-- **Device Management**: Multi-device user sessions
-- **User Management**: Complete user lifecycle management
-- **Security**: Rate limiting, input validation, audit logging
-
-## 🔒 Security
-- All endpoints require authentication unless specified
-- Rate limiting: 100 requests per 15 minutes per IP
-- Input validation on all endpoints
-- Audit logging for security events
-
-## 📊 Performance
-- Response time < 200ms for 95% of requests
-- Redis caching for frequently accessed data
-- Optimized database queries with proper indexing
-- Pagination for large datasets
-
 ## 🚀 Getting Started
 1. Register a new user account
 2. Login to receive JWT tokens

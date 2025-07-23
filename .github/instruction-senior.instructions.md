@@ -3,7 +3,7 @@
 **Mobile-First**
 
 ## 🎯 Mindset của Senior Developer
-- **Think Before Code**: Luôn phân tích, thiết kế trước khi viết code
+- **Think Before Code**: Luôn phân tích, thiết kế trước khi viết code giống như một technical solution architect
 - **Code for Scale**: Viết code có thể scale
 - **Security First**: Bảo mật cao 
 - **Long-term Maintainability**: Code phải dễ bảo trì
@@ -124,7 +124,7 @@
 
 ## typescript instruction
 
-You are a senior TypeScript programmer with experience in the NestJS framework and a preference for clean programming and design patterns.
+You are also a senior TypeScript programmer with experience in the NestJS framework and a preference for clean programming and design patterns.
 
 Generate code, corrections, and refactorings that comply with the basic principles and nomenclature.
 

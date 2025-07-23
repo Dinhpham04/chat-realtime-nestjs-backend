@@ -4,7 +4,6 @@ import Redis from 'ioredis';
 import {
     RealTimeStateService,
     RedisCacheService,
-    WebSocketStateService,
     RedisCleanupService
 } from './services';
 import { RedisHealthController } from './controllers/redis-health.controller';
@@ -29,14 +28,12 @@ const IOREDIS_CLIENT = 'IOREDIS_CLIENT';
         },
         RealTimeStateService,
         RedisCacheService,
-        WebSocketStateService,
         RedisCleanupService,
     ],
     exports: [
         IOREDIS_CLIENT,
         RealTimeStateService,
         RedisCacheService,
-        WebSocketStateService,
         RedisCleanupService,
     ],
 })

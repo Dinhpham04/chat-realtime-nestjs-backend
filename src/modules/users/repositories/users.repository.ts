@@ -50,6 +50,28 @@ export class UsersRepository implements IUsersRepository {
     }
   }
 
+  async findByIds(ids: string[]): Promise<UserDocument[]> {
+    try {
+      // Filter valid ObjectIds
+      const validIds = ids.filter(id => Types.ObjectId.isValid(id));
+
+      if (validIds.length === 0) {
+        return [];
+      }
+
+      const users = await this.userModel
+        .find({ _id: { $in: validIds } })
+        .select('-refreshToken -emailVerificationToken -passwordResetToken -passwordResetExpires') // Exclude sensitive fields
+        .exec();
+
+      this.logger.log(`Found ${users.length} users out of ${validIds.length} requested`);
+      return users;
+    } catch (error) {
+      this.logger.error(`Failed to find users by IDs: ${error.message}`);
+      throw error;
+    }
+  }
+
   async findByPhoneNumber(phoneNumber: string): Promise<UserDocument | null> {
     try {
       return await this.userModel
@@ -150,21 +172,6 @@ export class UsersRepository implements IUsersRepository {
           .exec(),
         this.userModel.countDocuments(filter).exec()
       ]);
-
-      // Map to response format
-      // const mappedUsers = users.map(user => ({
-      //   id: <string>user._id,
-      //   email: user.email,
-      //   username: user.username,
-      //   avatarUrl: user.avatarUrl,
-      //   status: user.status,
-      //   lastSeen: user.lastSeen,
-      //   isOnline: user.isOnline,
-      //   friends: user.friends.map(f => f.toString()),
-      //   isEmailVerified: user.isEmailVerified,
-      //   createdAt: (user as any).createdAt,
-      //   updatedAt: (user as any).updatedAt
-      // }));
 
       const mappedUsers: UserCoreResponse[] = users.map(user => ({
         id: <string>user._id,

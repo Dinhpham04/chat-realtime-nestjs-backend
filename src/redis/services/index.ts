@@ -10,5 +10,4 @@
 
 export * from './realtime-state.service';
 export * from './redis-cache.service';
-export * from './websocket-state.service';
 export * from './redis-cleanup.service';
