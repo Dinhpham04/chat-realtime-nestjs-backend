@@ -159,6 +159,7 @@ export enum ReactionInputMethod {
  * Basic message information
  */
 export interface MessageInfo {
+  readonly id?: string; // Message ID (optional for new messages)
   readonly conversationId: string;
   readonly senderId: string;
   readonly messageType: MessageType;
@@ -167,6 +168,8 @@ export interface MessageInfo {
   readonly replyToMessageId?: string;
   readonly editedAt?: Date;
   readonly isEdited: boolean;
+  readonly isDeleted?: boolean; // Add isDeleted property
+  readonly clientMessageId?: string; // Add clientMessageId property
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -489,8 +492,11 @@ export interface CreateMessageData {
   };
   readonly attachments?: readonly CreateMessageAttachmentData[];
   readonly replyToMessageId?: string;
+  readonly replyTo?: string; // Alias for replyToMessageId
+  readonly mentions?: readonly string[]; // Top-level mentions for backward compatibility
   readonly systemData?: SystemMessageData;
   readonly locationData?: LocationData;
+  readonly clientMessageId?: string;
   readonly metadata?: Record<string, any>;
 }
 
@@ -498,7 +504,11 @@ export interface CreateMessageData {
  * Data for updating message
  */
 export interface UpdateMessageData {
-  content?: string;
+  content?: {
+    text: string;
+    mentions?: readonly string[];
+  };
+  mentions?: readonly string[]; // Top-level mentions for backward compatibility
   editReason?: string;
   isEdited?: boolean;
   editedAt?: Date;
@@ -645,6 +655,8 @@ export interface MessageListResponse {
   readonly hasNewer: boolean;
   readonly oldestMessageId?: string;
   readonly newestMessageId?: string;
+  readonly nextCursor?: string; // Add nextCursor support
+  readonly totalCount?: number; // Add totalCount support
 }
 
 /**

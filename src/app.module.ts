@@ -9,7 +9,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
-// import { ConversationsModule } from './modules/conversations/conversations.module';
+import { ConversationsModule } from './modules/conversations/conversations.module';
 
 // Import shared components
 import {
@@ -30,12 +30,15 @@ import { FriendsModule } from './modules/friends/friends.module';
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'default-secret',
+      // signOptions: {
+      //   expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m'
+      // },
     }),
     DatabaseModule,
     RedisModule,
     UsersModule,
     AuthModule,
-    // ConversationsModule,
+    ConversationsModule,
     FriendsModule,
   ],
   controllers: [AppController],
@@ -46,6 +49,11 @@ import { FriendsModule } from './modules/friends/friends.module';
       provide: APP_FILTER,
       useClass: GlobalExceptionFilter,
     },
+    // {
+    //   provide: APP_FILTER,
+    //   useClass: JwtAuthExceptionFilter,
+    // },
+    // Global Interceptors
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
