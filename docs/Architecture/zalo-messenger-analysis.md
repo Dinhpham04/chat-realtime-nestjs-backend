@@ -13,133 +13,137 @@
 
 #### **1. Connection Management:**
 ```typescript
-// Zalo uses persistent WebSocket với fallback
-Primary: WebSocket (wss://chat-ws.zalo.me)
-Fallback: Long-polling (https://chat-api.zalo.me/poll)
-Mobile: Custom TCP protocol cho battery optimization
+// Zalo uses persistent connection với fallback (Similar to Socket.IO)
+Primary: Socket.IO WebSocket (wss://chat-ws.zalo.me/socket.io/)
+Fallback: Socket.IO Long-polling (https://chat-api.zalo.me/socket.io/)
+Mobile: Socket.IO với custom transport optimization
 
-// Connection heartbeat
-setInterval(() => {
-  ws.send({ type: 'ping', timestamp: Date.now() });
-}, 30000); // 30s interval
+// Socket.IO connection with auto-reconnect
+import { io } from 'socket.io-client';
+
+const socket = io('wss://chat-ws.zalo.me', {
+  autoConnect: true,
+  reconnection: true,
+  reconnectionDelay: 1000,
+  reconnectionAttempts: 5,
+  timeout: 20000,
+  transports: ['websocket', 'polling'] // Fallback strategy
+});
+
+// Built-in heartbeat (Socket.IO handles automatically)
+socket.on('connect', () => {
+  console.log('Connected to chat server');
+});
+
+socket.on('disconnect', (reason) => {
+  console.log('Disconnected:', reason);
+  // Socket.IO auto-reconnects unless manually disconnected
+});
 ```
 
 #### **2. Message Delivery Protocol:**
 ```typescript
-// Zalo's message flow
-1. Client gửi tin nhắn:
-{
+// Zalo's message flow với Socket.IO
+// 1. Client gửi tin nhắn:
+socket.emit('send_message', {
   msgId: "local_uuid",
   conversationId: "conv_123", 
   content: "Hello",
   timestamp: 1627890123456,
   clientMsgId: "unique_client_id"
-}
+});
 
-2. Server response ngay lập tức:
-{
-  status: "received",
-  msgId: "local_uuid", 
-  serverMsgId: "server_generated_id",
-  timestamp: 1627890123500
-}
+// 2. Server response ngay lập tức (acknowledgment):
+socket.emit('send_message', messageData, (ack) => {
+  // Server acknowledgment callback
+  console.log('Server received:', ack);
+  // {
+  //   status: "received",
+  //   msgId: "local_uuid", 
+  //   serverMsgId: "server_generated_id",
+  //   timestamp: 1627890123500
+  // }
+});
 
-3. Server broadcast đến participants:
-{
+// 3. Server broadcast đến participants (rooms):
+// Server joins clients to conversation rooms
+socket.join(`conversation:${conversationId}`);
+
+// Broadcast to room
+io.to(`conversation:${conversationId}`).emit('new_message', {
   type: "new_message",
   msgId: "server_generated_id",
   from: "user_123",
   conversationId: "conv_123",
   content: "Hello",
   timestamp: 1627890123500
-}
+});
 
-4. Client devices gửi delivery confirmation:
-{
-  type: "message_delivered",
+// 4. Client devices gửi delivery confirmation:
+socket.emit('message_delivered', {
   msgId: "server_generated_id",
   userId: "user_456"
-}
+});
 
-5. Read receipt khi user scroll qua message:
-{
-  type: "message_read", 
+// 5. Read receipt khi user scroll qua message:
+socket.emit('message_read', {
   msgId: "server_generated_id",
   userId: "user_456",
   readAt: 1627890130000
-}
+});
 ```
 
 #### **3. Offline Message Strategy:**
 ```typescript
-// Zalo's offline handling
-1. Server keeps "message_queue" per user in Redis:
-   LPUSH user:123:offline_queue "serialized_message"
+// Zalo's offline handling với Socket.IO rooms
+// 1. Server keeps "message_queue" per user in Redis:
+const userId = "user_123";
 
-2. Khi user online lại:
-   - Get all queued messages
-   - Send batch to client  
-   - Client ACK từng message
-   - Server remove from queue
+// Store offline messages in Redis
+await redis.lpush(`offline_queue:${userId}`, JSON.stringify(message));
+await redis.expire(`offline_queue:${userId}`, 86400 * 7); // 7 days
 
-3. Message retention:
-   - Recent messages: Redis (7 days)
-   - Historical: MongoDB
-   - Media files: CDN với expiry
-```
-
----
-
-## 💬 **MESSENGER'S APPROACH**
-
-### **A. Facebook's Architecture:**
-```typescript
-// Messenger uses more sophisticated approach
-1. Message Status Levels:
-   ○ = Đang gửi (sending)
-   ✓ = Đã gửi (sent to server)
-   ✓ = Đã nhận (delivered to device)
-   👤 = Đã xem (seen by user)
-
-2. Real-time Infrastructure:
-   - MQTT protocol for mobile
-   - WebSocket for web
-   - Custom binary protocol for efficiency
-```
-
-### **B. Technical Details:**
-
-#### **1. Message Deduplication:**
-```typescript
-// Messenger's dedup strategy
-{
-  messageId: "uuid_v4",
-  clientTimestamp: 1627890123456,
-  serverTimestamp: 1627890123500,
-  dedupeKey: "user_123_conv_456_1627890123456" // Prevent duplicates
-}
-```
-
-#### **2. Delivery Optimization:**
-```typescript
-// Batch delivery updates
-setInterval(() => {
-  const deliveryBatch = collectDeliveryUpdates();
+// 2. Khi user online lại (Socket.IO connection event):
+socket.on('connect', async () => {
+  const userId = await getUserFromSocket(socket);
   
-  ws.send({
-    type: "delivery_batch",
-    updates: [
-      { msgId: "msg_1", status: "delivered", userId: "user_1" },
-      { msgId: "msg_2", status: "read", userId: "user_2" },
-      { msgId: "msg_3", status: "delivered", userId: "user_3" }
-    ]
-  });
-}, 1000); // Batch every 1 second
+  // Join user to personal room
+  socket.join(`user:${userId}`);
+  
+  // Get all queued messages
+  const queuedMessages = await redis.lrange(`offline_queue:${userId}`, 0, -1);
+  
+  // Send batch to client với Socket.IO acknowledgment
+  if (queuedMessages.length > 0) {
+    socket.emit('offline_messages_batch', {
+      messages: queuedMessages.map(msg => JSON.parse(msg)),
+      total: queuedMessages.length
+    }, (ack) => {
+      // Client ACK từng message batch
+      if (ack.received) {
+        // Clear queue after successful delivery
+        redis.del(`offline_queue:${userId}`);
+      }
+    });
+  }
+});
+
+// 3. Message retention strategy:
+const messageRetention = {
+  // Recent messages: Redis (7 days)
+  recent: "redis_cache_recent_messages",
+  
+  // Historical: MongoDB  
+  historical: "mongodb_permanent_storage",
+  
+  // Media files: CDN với expiry
+  media: "cdn_storage_with_ttl"
+};
 ```
 
 #### **3. Read Receipts Optimization:**
 ```typescript
-// Messenger's read receipt batching
+// Messenger's read receipt batching với Socket.IO
 const readReceiptBuffer = new Map();
 
 function markAsRead(messageId: string) {
@@ -149,13 +153,35 @@ function markAsRead(messageId: string) {
   clearTimeout(readReceiptTimer);
   readReceiptTimer = setTimeout(() => {
     const batch = Array.from(readReceiptBuffer.entries());
-    ws.send({
-      type: "read_receipts_batch",
+    
+    // Socket.IO emit với acknowledgment
+    socket.emit('read_receipts_batch', {
       receipts: batch.map(([msgId, timestamp]) => ({ msgId, timestamp }))
+    }, (ack) => {
+      if (ack.success) {
+        readReceiptBuffer.clear();
+      }
     });
-    readReceiptBuffer.clear();
   }, 500); // Wait 500ms before sending
 }
+
+// Server-side batch processing
+socket.on('read_receipts_batch', async (data, callback) => {
+  try {
+    await processReadReceiptsBatch(data.receipts);
+    
+    // Broadcast to conversation participants using rooms
+    const conversationId = await getConversationFromMessage(data.receipts[0].msgId);
+    socket.to(`conversation:${conversationId}`).emit('read_status_update', {
+      userId: socket.userId,
+      readReceipts: data.receipts
+    });
+    
+    callback({ success: true });
+  } catch (error) {
+    callback({ success: false, error: error.message });
+  }
+});
 ```
 
 ---
@@ -202,11 +228,11 @@ interface MessageUserStatus {
 "read_batch:{userId}" → Set of messageIds to be marked as read
 ```
 
-#### **3. WebSocket Protocol:**
+#### **3. Socket.IO Protocol (Enhanced WebSocket):**
 ```typescript
-// Optimized message protocol
-interface MessageProtocol {
-  // Send message
+// Optimized Socket.IO message protocol
+interface SocketIOMessageProtocol {
+  // Send message với acknowledgment
   send_message: {
     localId: string;        // Client-generated UUID
     conversationId: string;
@@ -215,15 +241,17 @@ interface MessageProtocol {
     timestamp: number;
   };
   
-  // Server confirmation
-  message_received: {
+  // Server confirmation với callback
+  // socket.emit('send_message', data, (ack) => { ... })
+  send_message_ack: {
     localId: string;        // Echo back client ID
     serverId: string;       // Server-generated ID
     timestamp: number;
-    status: 'received';
+    status: 'received' | 'failed';
+    error?: string;
   };
   
-  // Broadcast to participants
+  // Broadcast to conversation room
   new_message: {
     id: string;
     conversationId: string;
@@ -232,7 +260,7 @@ interface MessageProtocol {
     timestamp: number;
   };
   
-  // Delivery updates (batched)
+  // Delivery updates (batched) - room-based broadcast
   delivery_updates: {
     updates: Array<{
       messageId: string;
@@ -242,12 +270,33 @@ interface MessageProtocol {
     }>;
   };
   
-  // Read receipts (batched)
-  read_receipts: {
+  // Read receipts (batched) với acknowledgment
+  read_receipts_batch: {
     conversationId: string;
     userId: string;
     messageIds: string[];
     timestamp: number;
+  };
+  
+  // Socket.IO specific events
+  connection: {
+    userId: string;
+    deviceId: string;
+    deviceType: 'mobile' | 'web' | 'desktop';
+  };
+  
+  disconnect: {
+    reason: string;
+    // Socket.IO handles auto-reconnect
+  };
+  
+  // Room management
+  join_conversations: {
+    conversationIds: string[];
+  };
+  
+  leave_conversations: {
+    conversationIds: string[];
   };
 }
 ```
@@ -258,62 +307,196 @@ interface MessageProtocol {
 
 ### **Phase 1: Core Messaging (Week 1-2)**
 ```typescript
-// Basic WebSocket infrastructure
-@WebSocketGateway({ namespace: '/chat' })
-export class ChatGateway {
+// Socket.IO Gateway infrastructure
+import { 
+  WebSocketGateway, 
+  WebSocketServer, 
+  SubscribeMessage, 
+  OnGatewayConnection, 
+  OnGatewayDisconnect 
+} from '@nestjs/websockets';
+import { Server, Socket } from 'socket.io';
+
+@WebSocketGateway({ 
+  namespace: '/chat',
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  transports: ['websocket', 'polling'] // Fallback support
+})
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  @WebSocketServer()
+  server: Server;
+
+  // Auto-handled connection event
+  async handleConnection(client: Socket) {
+    console.log(`Client connected: ${client.id}`);
+    
+    // Authenticate user
+    const user = await this.authenticateSocket(client);
+    if (!user) {
+      client.disconnect();
+      return;
+    }
+    
+    // Join user to personal room
+    client.join(`user:${user.id}`);
+    
+    // Join user's conversations
+    const conversations = await this.getUserConversations(user.id);
+    for (const conv of conversations) {
+      client.join(`conversation:${conv.id}`);
+    }
+    
+    // Deliver offline messages
+    await this.deliverOfflineMessages(client, user.id);
+  }
+
+  // Auto-handled disconnection
+  async handleDisconnect(client: Socket) {
+    console.log(`Client disconnected: ${client.id}`);
+    // Socket.IO automatically handles room cleanup
+  }
+
   @SubscribeMessage('send_message')
   async handleSendMessage(client: Socket, data: SendMessageDto) {
     // 1. Validate & store message
-    // 2. Send immediate confirmation
-    // 3. Broadcast to conversation participants
+    const message = await this.messageService.create(data);
+    
+    // 2. Send immediate acknowledgment với callback
+    const ack = {
+      localId: data.localId,
+      serverId: message.id,
+      timestamp: message.createdAt.getTime(),
+      status: 'received' as const
+    };
+    
+    // 3. Broadcast to conversation room
+    this.server.to(`conversation:${data.conversationId}`).emit('new_message', {
+      id: message.id,
+      conversationId: data.conversationId,
+      senderId: data.senderId,
+      content: data.content,
+      timestamp: message.createdAt.getTime()
+    });
+    
     // 4. Update delivery status for online users
+    await this.updateDeliveryStatusForRoom(message, `conversation:${data.conversationId}`);
+    
+    return ack; // Socket.IO acknowledgment
   }
   
-  @SubscribeMessage('mark_delivered')
+  @SubscribeMessage('message_delivered')
   async handleMarkDelivered(client: Socket, data: DeliveryDto) {
     // Batch delivery updates every 1 second
+    await this.deliveryBatchService.addUpdate(data);
   }
   
-  @SubscribeMessage('mark_read')
+  @SubscribeMessage('mark_as_read')
   async handleMarkRead(client: Socket, data: ReadReceiptDto) {
     // Batch read receipts every 500ms
+    await this.readReceiptBatchService.addReceipt(data);
+    
+    // Broadcast read status to conversation participants
+    client.to(`conversation:${data.conversationId}`).emit('read_status_update', {
+      userId: data.userId,
+      messageIds: data.messageIds,
+      timestamp: Date.now()
+    });
+  }
+
+  // Room management
+  @SubscribeMessage('join_conversations')
+  async handleJoinConversations(client: Socket, data: { conversationIds: string[] }) {
+    for (const convId of data.conversationIds) {
+      await client.join(`conversation:${convId}`);
+    }
+  }
+
+  @SubscribeMessage('leave_conversations')
+  async handleLeaveConversations(client: Socket, data: { conversationIds: string[] }) {
+    for (const convId of data.conversationIds) {
+      await client.leave(`conversation:${convId}`);
+    }
   }
 }
 ```
 
 ### **Phase 2: Offline Handling (Week 3)**
 ```typescript
-// Message queue service
+// Message queue service với Socket.IO integration
 @Injectable()
 export class MessageQueueService {
+  constructor(
+    private readonly redis: RedisService,
+    private readonly chatGateway: ChatGateway
+  ) {}
+
   async queueForOfflineUser(userId: string, message: Message) {
-    await this.redis.lpush(`offline_queue:${userId}`, message.id);
+    await this.redis.lpush(`offline_queue:${userId}`, JSON.stringify({
+      id: message.id,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      content: message.content,
+      timestamp: message.createdAt.getTime(),
+      type: message.type
+    }));
     await this.redis.expire(`offline_queue:${userId}`, 86400 * 7); // 7 days
   }
   
   async deliverQueuedMessages(userId: string, socket: Socket) {
     const messageIds = await this.redis.lrange(`offline_queue:${userId}`, 0, -1);
-    const messages = await this.messageService.getMessagesByIds(messageIds);
     
-    for (const message of messages) {
-      socket.emit('new_message', message);
-      await this.updateDeliveryStatus(message.id, userId, 'delivered');
-    }
+    if (messageIds.length === 0) return;
     
-    await this.redis.del(`offline_queue:${userId}`);
+    const messages = messageIds.map(msgStr => JSON.parse(msgStr));
+    
+    // Send batch với Socket.IO acknowledgment
+    socket.emit('offline_messages_batch', {
+      messages,
+      total: messages.length
+    }, async (ack) => {
+      if (ack.received) {
+        // Mark as delivered and clean queue
+        for (const message of messages) {
+          await this.updateDeliveryStatus(message.id, userId, 'delivered');
+        }
+        await this.redis.del(`offline_queue:${userId}`);
+      }
+    });
+  }
+
+  // Check if user is online in any Socket.IO room
+  async isUserOnline(userId: string): Promise<boolean> {
+    const sockets = await this.chatGateway.server.in(`user:${userId}`).fetchSockets();
+    return sockets.length > 0;
+  }
+
+  // Send to specific user across all devices
+  async sendToUser(userId: string, event: string, data: any) {
+    this.chatGateway.server.to(`user:${userId}`).emit(event, data);
+  }
+
+  // Send to conversation participants
+  async sendToConversation(conversationId: string, event: string, data: any) {
+    this.chatGateway.server.to(`conversation:${conversationId}`).emit(event, data);
   }
 }
 ```
 
 ### **Phase 3: Optimization (Week 4)**
 ```typescript
-// Message batching và compression
+// Message batching và compression với Socket.IO
 @Injectable()
 export class MessageOptimizationService {
   private deliveryBatch = new Map<string, any[]>();
   private readBatch = new Map<string, string[]>();
   
-  constructor() {
+  constructor(
+    private readonly chatGateway: ChatGateway,
+    private readonly redis: RedisService
+  ) {
     // Batch delivery updates every 1 second
     setInterval(() => this.flushDeliveryBatch(), 1000);
     
@@ -328,14 +511,56 @@ export class MessageOptimizationService {
     this.deliveryBatch.get(conversationId)!.push(update);
   }
   
+  addReadReceipt(conversationId: string, messageId: string, userId: string) {
+    const key = `${conversationId}:${userId}`;
+    if (!this.readBatch.has(key)) {
+      this.readBatch.set(key, []);
+    }
+    this.readBatch.get(key)!.push(messageId);
+  }
+  
   private async flushDeliveryBatch() {
     for (const [conversationId, updates] of this.deliveryBatch) {
-      await this.websocketGateway.broadcastToConversation(conversationId, {
-        type: 'delivery_updates',
-        updates
+      // Use Socket.IO rooms for efficient broadcasting
+      this.chatGateway.server.to(`conversation:${conversationId}`).emit('delivery_updates_batch', {
+        updates,
+        timestamp: Date.now()
       });
     }
     this.deliveryBatch.clear();
+  }
+
+  private async flushReadBatch() {
+    for (const [key, messageIds] of this.readBatch) {
+      const [conversationId, userId] = key.split(':');
+      
+      // Broadcast read receipts to conversation participants
+      this.chatGateway.server.to(`conversation:${conversationId}`).emit('read_receipts_batch', {
+        userId,
+        messageIds: [...new Set(messageIds)], // Remove duplicates
+        timestamp: Date.now()
+      });
+    }
+    this.readBatch.clear();
+  }
+
+  // Socket.IO specific optimizations
+  async optimizeRoomManagement() {
+    // Get all active rooms
+    const rooms = this.chatGateway.server.sockets.adapter.rooms;
+    
+    // Clean up empty rooms (Socket.IO doesn't auto-clean)
+    for (const [roomName, room] of rooms) {
+      if (room.size === 0 && roomName.startsWith('conversation:')) {
+        console.log(`Cleaning up empty room: ${roomName}`);
+      }
+    }
+  }
+
+  // Compression for large payloads (Socket.IO supports this)
+  async sendCompressedMessage(roomName: string, event: string, data: any) {
+    // Socket.IO automatically compresses large messages
+    this.chatGateway.server.to(roomName).compress(true).emit(event, data);
   }
 }
 ```
