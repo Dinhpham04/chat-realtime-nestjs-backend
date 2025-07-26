@@ -1,21 +1,13 @@
 /**
- * ConversationRepository Interface
+ * Minimal ConversationRepository Interface - Only Used Methods
  * 
- * 🎯 Purpose: Define contract for conversation data access layer
- * 📱 Mobile-First: Optimized for real-time chat operations
- * 🚀 Clean Architecture: Repository pattern with interface segregation
- * 
- * Features:
- * - CRUD operations for conversations
- * - Participant management
- * - Search and filtering
- * - Performance optimizations
+ * 🎯 Purpose: Essential conversation data access operations
+ * 📱 Mobile-First: Optimized for current API implementation
+ * 🚀 Clean Architecture: Repository pattern with minimal interface
  */
 
-import { Types } from 'mongoose';
 import {
   ConversationType,
-  UserConversationStatus,
   ParticipantRole,
   CreateConversationData,
   UpdateConversationData,
@@ -23,7 +15,7 @@ import {
   ConversationWithParticipants,
   ConversationListItem,
   ParticipantData,
-  ConversationSearchOptions,
+  AddParticipantData,
 } from '../../types/conversation.types';
 
 export interface IConversationRepository {
@@ -40,7 +32,7 @@ export interface IConversationRepository {
   findByIdWithParticipants(conversationId: string): Promise<ConversationWithParticipants | null>;
 
   /**
-   * Find conversation by ID (basic info only)
+   * Find conversation by ID (basic info only - alias for findByIdWithParticipants)
    */
   findById(conversationId: string): Promise<ConversationWithParticipants | null>;
 
@@ -50,19 +42,14 @@ export interface IConversationRepository {
   updateById(conversationId: string, updateData: UpdateConversationData): Promise<ConversationWithParticipants | null>;
 
   /**
-   * Soft delete conversation (archive)
+   * Soft delete conversation (set isActive = false)
    */
   softDeleteById(conversationId: string): Promise<boolean>;
-
-  /**
-   * Permanently delete conversation (admin only)
-   */
-  deleteById(conversationId: string): Promise<boolean>;
 
   // =============== CONVERSATION QUERIES ===============
 
   /**
-   * Find user's conversations with pagination and filtering
+   * Get user's conversations with pagination and filtering
    */
   findUserConversations(
     userId: string,
@@ -74,39 +61,12 @@ export interface IConversationRepository {
   }>;
 
   /**
-   * Check if direct conversation exists between users
+   * Find direct conversation between two users
    */
   findDirectConversationByParticipants(
     userId1: string,
     userId2: string
   ): Promise<ConversationWithParticipants | null>;
-
-  /**
-   * Find conversations by participant IDs (for group check)
-   */
-  findByParticipants(participantIds: string[]): Promise<ConversationWithParticipants[]>;
-
-  /**
-   * Search conversations by name or content
-   */
-  searchConversations(
-    userId: string,
-    searchOptions: ConversationSearchOptions
-  ): Promise<{
-    conversations: ConversationListItem[];
-    total: number;
-  }>;
-
-  /**
-   * Get conversation statistics for user
-   */
-  getUserConversationStats(userId: string): Promise<{
-    totalConversations: number;
-    activeConversations: number;
-    archivedConversations: number;
-    groupConversations: number;
-    directConversations: number;
-  }>;
 
   // =============== PARTICIPANT MANAGEMENT ===============
 
@@ -115,28 +75,14 @@ export interface IConversationRepository {
    */
   addParticipants(
     conversationId: string,
-    participants: ParticipantData[]
+    participants: AddParticipantData[]
   ): Promise<{
     added: ParticipantData[];
     failed: { userId: string; reason: string }[];
   }>;
 
   /**
-   * Remove participant from conversation
-   */
-  removeParticipant(conversationId: string, userId: string): Promise<boolean>;
-
-  /**
-   * Update participant role
-   */
-  updateParticipantRole(
-    conversationId: string,
-    userId: string,
-    role: ParticipantRole
-  ): Promise<boolean>;
-
-  /**
-   * Check if user is participant in conversation
+   * Check if user is participant of conversation
    */
   isUserParticipant(conversationId: string, userId: string): Promise<boolean>;
 
@@ -146,24 +92,33 @@ export interface IConversationRepository {
   getUserRole(conversationId: string, userId: string): Promise<ParticipantRole | null>;
 
   /**
-   * Get conversation participants with pagination
+   * Update participant role
    */
-  getParticipants(
+  updateParticipantRole(
     conversationId: string,
-    options: {
-      limit?: number;
-      offset?: number;
-      role?: ParticipantRole;
-    }
-  ): Promise<{
-    participants: ParticipantData[];
-    total: number;
-  }>;
+    userId: string,
+    newRole: ParticipantRole
+  ): Promise<boolean>;
+
+  /**
+   * Remove participant from conversation
+   */
+  removeParticipant(conversationId: string, userId: string): Promise<boolean>;
+
+  /**
+   * Get participants count
+   */
+  getParticipantsCount(conversationId: string): Promise<number>;
+
+  /**
+   * Count admins in conversation
+   */
+  countAdmins(conversationId: string): Promise<number>;
 
   // =============== CONVERSATION UPDATES ===============
 
   /**
-   * Update last message in conversation
+   * Update last message info when new message is sent
    */
   updateLastMessage(
     conversationId: string,
@@ -177,78 +132,7 @@ export interface IConversationRepository {
   ): Promise<boolean>;
 
   /**
-   * Update conversation status (archive, pin, mute)
-   */
-  updateConversationStatus(
-    conversationId: string,
-    userId: string,
-    status: Partial<UserConversationStatus>
-  ): Promise<boolean>;
-
-  /**
-   * Increment unread count for participants (except sender)
-   */
-  incrementUnreadCount(conversationId: string, excludeUserId: string): Promise<boolean>;
-
-  /**
-   * Reset unread count for user
-   */
-  resetUnreadCount(conversationId: string, userId: string): Promise<boolean>;
-
-  /**
-   * Update conversation activity timestamp
+   * Update last activity timestamp
    */
   updateLastActivity(conversationId: string): Promise<boolean>;
-
-  // =============== BULK OPERATIONS ===============
-
-  /**
-   * Mark multiple conversations as read for user
-   */
-  markMultipleAsRead(conversationIds: string[], userId: string): Promise<number>;
-
-  /**
-   * Archive multiple conversations for user
-   */
-  archiveMultiple(conversationIds: string[], userId: string): Promise<number>;
-
-  /**
-   * Get multiple conversations by IDs
-   */
-  findByIds(conversationIds: string[]): Promise<ConversationWithParticipants[]>;
-
-  // =============== AGGREGATION QUERIES ===============
-
-  /**
-   * Get conversation metrics for analytics
-   */
-  getConversationMetrics(
-    conversationId: string,
-    dateRange?: { from: Date; to: Date }
-  ): Promise<{
-    messageCount: number;
-    participantCount: number;
-    averageResponseTime: number;
-    activeParticipants: number;
-  }>;
-
-  /**
-   * Get user's conversation activity summary
-   */
-  getUserActivitySummary(
-    userId: string,
-    period: 'day' | 'week' | 'month'
-  ): Promise<{
-    totalMessages: number;
-    activeConversations: number;
-    newConversations: number;
-    averageResponseTime: number;
-  }>;
-
-  // =============== TRANSACTION SUPPORT ===============
-
-  /**
-   * Execute operations within a database transaction
-   */
-  withTransaction<T>(operation: () => Promise<T>): Promise<T>;
 }

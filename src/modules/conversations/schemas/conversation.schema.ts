@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { ConversationType, ConversationInfo } from '../types/conversation.types';
+import { ConversationType } from '../types/conversation.types';
 
 export type ConversationDocument = Conversation & Document;
 

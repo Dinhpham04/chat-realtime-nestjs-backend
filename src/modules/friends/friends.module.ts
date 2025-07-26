@@ -20,29 +20,6 @@ import { FriendsController, ContactController } from './controllers';
 // External Dependencies
 import { UsersModule } from '../users/users.module';
 import { RedisModule } from '../../redis/redis.module';
-
-/**
- * Friends Module - Senior Level Implementation
- * 
- * 🎯 Purpose: Friend management system for mobile messaging app
- * 📱 Mobile-First: WhatsApp-style friend features
- * 🚀 Clean Architecture: Full dependency injection
- * 🔒 Security First: Proper validation and authorization
- * 📊 Performance: Redis caching integration
- * 
- * Features:
- * - Friend requests lifecycle with validation
- * - Contact sync & discovery with phone numbers
- * - Block/unblock system with security
- * - Mobile-optimized responses with caching
- * - Real-time status updates
- * 
- * Following instruction-senior.md:
- * - Complete dependency injection
- * - Interface-based design (SOLID DIP)
- * - Performance optimization
- * - Security-first approach
- */
 @Module({
     imports: [
         // MongoDB Schemas

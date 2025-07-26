@@ -27,6 +27,7 @@ import {
   ConversationWithParticipants,
   ConversationListItem,
   ParticipantData,
+  ParticipantInfo,
   ConversationSearchOptions,
 } from '../types/conversation.types';
 import { Conversation, ConversationDocument } from '../schemas/conversation.schema';
@@ -49,6 +50,7 @@ export class ConversationRepository implements IConversationRepository {
   async create(data: CreateConversationData): Promise<ConversationWithParticipants> {
     try {
       this.logger.debug(`Creating conversation with data: ${JSON.stringify(data)}`);
+
 
       const conversation = new this.conversationModel({
         type: data.type,
@@ -118,23 +120,88 @@ export class ConversationRepository implements IConversationRepository {
 
   async findByIdWithParticipants(conversationId: string): Promise<ConversationWithParticipants | null> {
     try {
-      const conversation = await this.conversationModel
-        .findById(conversationId)
-        .exec();
+      // Use aggregation to get conversation with participants and user details in one query
+      const result = await this.conversationModel.aggregate([
+        {
+          $match: {
+            _id: new Types.ObjectId(conversationId),
+            isActive: true
+          }
+        },
+        {
+          $lookup: {
+            from: 'conversation_participants', // Collection name
+            let: { conversationId: '$_id' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$conversationId', '$$conversationId'] },
+                      { $not: { $ifNull: ['$leftAt', false] } } // Active participants only
+                    ]
+                  }
+                }
+              },
+              {
+                $lookup: {
+                  from: 'users_core', // Users collection
+                  localField: 'userId',
+                  foreignField: '_id',
+                  as: 'userDetails',
+                  pipeline: [
+                    {
+                      $project: {
+                        username: 1,
+                        fullName: 1,
+                        avatarUrl: 1,
+                        isOnline: 1,
+                        lastSeen: 1
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                $unwind: {
+                  path: '$userDetails',
+                  preserveNullAndEmptyArrays: true
+                }
+              }
+            ],
+            as: 'participants'
+          }
+        }
+      ]).exec();
 
-      if (!conversation) {
-        return null;
+      if (!result || result.length === 0) {
+        this.logger.warn(`Conversation not found in aggregation: ${conversationId}`);
+
+        // Fallback: Try simple find
+        const conversation = await this.conversationModel.findById(conversationId).exec();
+        if (!conversation) {
+          return null;
+        }
+
+        // Get participants separately
+        const participants = await this.participantModel
+          .find({
+            conversationId: new Types.ObjectId(conversationId),
+            leftAt: null
+          })
+          .exec();
+
+        return this.mapToConversationWithParticipants(conversation, participants);
       }
 
-      const participants = await this.participantModel
-        .find({
-          conversationId: new Types.ObjectId(conversationId),
-          leftAt: { $exists: false } // Active participants
-        })
-        .populate('userId', 'username fullName avatarUrl isOnline lastSeen')
-        .exec();
+      const conversationData = result[0];
+      this.logger.debug('Aggregation result:', {
+        id: conversationData._id,
+        name: conversationData.name,
+        participantCount: conversationData.participants?.length || 0
+      });
 
-      return this.mapToConversationWithParticipants(conversation, participants);
+      return this.mapAggregatedToConversationWithParticipants(conversationData);
     } catch (error) {
       this.logger.error(`Error finding conversation by ID: ${error.message}`, error.stack);
       throw error;
@@ -237,7 +304,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           $match: {
             userId: new Types.ObjectId(userId),
-            leftAt: { $exists: false }, // Active participants only
+            leftAt: null, // Active participants only
             ...(status === 'archived' && { 'settings.isArchived': true }),
             ...(status === 'active' && { 'settings.isArchived': { $ne: true } }),
           },
@@ -294,13 +361,7 @@ export class ConversationRepository implements IConversationRepository {
           $project: {
             id: '$conversation._id',
             type: '$conversation.type',
-            name: {
-              $cond: {
-                if: { $eq: ['$conversation.type', ConversationType.DIRECT] },
-                then: '$settings.customName',
-                else: '$conversation.name',
-              },
-            },
+            name: '$conversation.name',
             avatarUrl: '$conversation.avatarUrl',
             participantCount: { $ifNull: [{ $arrayElemAt: ['$participantCount.count', 0] }, 0] },
             lastMessage: '$conversation.lastMessage',
@@ -358,11 +419,9 @@ export class ConversationRepository implements IConversationRepository {
       const participants = await this.participantModel
         .find({
           userId: { $in: [new Types.ObjectId(userId1), new Types.ObjectId(userId2)] },
-          leftAt: { $exists: false }, // Active participants only
+          leftAt: null, // Active participants only
         })
-        .populate('conversationId')
         .exec();
-
       // Group by conversation and check if both users are present
       const conversationMap = new Map<string, any[]>();
 
@@ -371,7 +430,7 @@ export class ConversationRepository implements IConversationRepository {
         if (!conversationMap.has(convId)) {
           conversationMap.set(convId, []);
         }
-        conversationMap.get(convId)!.push(participant);
+        conversationMap.get(convId)!.push(participant); // khẳng định là không null vì đã kiểm tra trước
       }
 
       // Find direct conversation with exactly these 2 participants
@@ -399,7 +458,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           $match: {
             userId: { $in: objectIds },
-            leftAt: { $exists: false }, // Active participants
+            leftAt: null, // Active participants
           },
         },
         {
@@ -449,7 +508,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           $match: {
             userId: new Types.ObjectId(userId),
-            leftAt: { $exists: false }, // Active participants
+            leftAt: null, // Active participants
             ...(includeArchived ? {} : { 'settings.isArchived': { $ne: true } }),
           },
         },
@@ -518,7 +577,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           $match: {
             userId: new Types.ObjectId(userId),
-            leftAt: { $exists: false }, // Active participants
+            leftAt: null, // Active participants
           },
         },
         {
@@ -646,7 +705,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           conversationId: new Types.ObjectId(conversationId),
           userId: new Types.ObjectId(userId),
-          leftAt: { $exists: false }, // Active participants
+          leftAt: null, // Active participants
         },
         {
           leftAt: new Date(),
@@ -674,7 +733,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           conversationId: new Types.ObjectId(conversationId),
           userId: new Types.ObjectId(userId),
-          leftAt: { $exists: false }, // Active participants
+          leftAt: null, // Active participants
         },
         { role }
       );
@@ -691,7 +750,7 @@ export class ConversationRepository implements IConversationRepository {
       const participant = await this.participantModel.findOne({
         conversationId: new Types.ObjectId(conversationId),
         userId: new Types.ObjectId(userId),
-        leftAt: { $exists: false }, // Active participants
+        leftAt: null, // Active participants
       });
 
       return participant !== null;
@@ -706,7 +765,7 @@ export class ConversationRepository implements IConversationRepository {
       const participant = await this.participantModel.findOne({
         conversationId: new Types.ObjectId(conversationId),
         userId: new Types.ObjectId(userId),
-        leftAt: { $exists: false }, // Active participants
+        leftAt: null, // Active participants
       });
 
       return participant?.role || null;
@@ -736,7 +795,7 @@ export class ConversationRepository implements IConversationRepository {
 
       const query: any = {
         conversationId: new Types.ObjectId(conversationId),
-        leftAt: { $exists: false }, // Active participants
+        leftAt: null, // Active participants
       };
 
       if (role) {
@@ -823,7 +882,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           conversationId: new Types.ObjectId(conversationId),
           userId: new Types.ObjectId(userId),
-          leftAt: { $exists: false },
+          leftAt: null,
         },
         updateFields
       );
@@ -841,7 +900,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           conversationId: new Types.ObjectId(conversationId),
           userId: { $ne: new Types.ObjectId(excludeUserId) },
-          leftAt: { $exists: false }, // Active participants
+          leftAt: null, // Active participants
         },
         {
           $inc: { 'readStatus.unreadCount': 1 },
@@ -861,7 +920,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           conversationId: new Types.ObjectId(conversationId),
           userId: new Types.ObjectId(userId),
-          leftAt: { $exists: false }, // Active participants
+          leftAt: null, // Active participants
         },
         {
           'readStatus.unreadCount': 0,
@@ -901,7 +960,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           conversationId: { $in: conversationIds.map(id => new Types.ObjectId(id)) },
           userId: new Types.ObjectId(userId),
-          leftAt: { $exists: false }, // Active participants
+          leftAt: null, // Active participants
         },
         {
           'readStatus.unreadCount': 0,
@@ -922,7 +981,7 @@ export class ConversationRepository implements IConversationRepository {
         {
           conversationId: { $in: conversationIds.map(id => new Types.ObjectId(id)) },
           userId: new Types.ObjectId(userId),
-          leftAt: { $exists: false }, // Active participants
+          leftAt: null, // Active participants
         },
         {
           'settings.isArchived': true,
@@ -969,7 +1028,7 @@ export class ConversationRepository implements IConversationRepository {
 
       const activeParticipants = await this.participantModel.countDocuments({
         conversationId: new Types.ObjectId(conversationId),
-        leftAt: { $exists: false }, // Active participants
+        leftAt: null, // Active participants
       });
 
       return {
@@ -998,7 +1057,7 @@ export class ConversationRepository implements IConversationRepository {
     try {
       const activeConversations = await this.participantModel.countDocuments({
         userId: new Types.ObjectId(userId),
-        leftAt: { $exists: false }, // Active participants
+        leftAt: null, // Active participants
       });
 
       return {
@@ -1048,7 +1107,55 @@ export class ConversationRepository implements IConversationRepository {
         messageType: conversation.lastMessage.messageType,
         sentAt: conversation.lastMessage.sentAt,
       } : undefined,
-      participants: participants.map(this.mapToParticipantData),
+      participants: participants.map(p => this.mapToParticipantInfo(p)),
+      lastActivity: conversation.lastActivity,
+    };
+  }
+
+  /**
+   * Map aggregated conversation data to ConversationWithParticipants
+   */
+  private mapAggregatedToConversationWithParticipants(aggregatedData: any): ConversationWithParticipants {
+    // Debug log to check what data we receive
+    this.logger.debug('Mapping aggregated data:', {
+      id: aggregatedData._id,
+      name: aggregatedData.name,
+      type: aggregatedData.type,
+      hasParticipants: !!aggregatedData.participants,
+      participantCount: aggregatedData.participants?.length || 0
+    });
+
+    return {
+      id: aggregatedData._id.toString(),
+      type: aggregatedData.type || 'direct',
+      name: aggregatedData.name || null,
+      description: aggregatedData.description || null,
+      avatarUrl: aggregatedData.avatarUrl || null,
+      createdBy: aggregatedData.createdBy?.toString() || '',
+      createdAt: aggregatedData.createdAt || new Date(),
+      updatedAt: aggregatedData.updatedAt || new Date(),
+      isActive: aggregatedData?.isActive, // Default to true
+      lastMessage: aggregatedData.lastMessage ? {
+        messageId: aggregatedData.lastMessage.messageId?.toString() || '',
+        senderId: aggregatedData.lastMessage.senderId?.toString() || '',
+        content: aggregatedData.lastMessage.content || '',
+        messageType: aggregatedData.lastMessage.messageType || 'text',
+        sentAt: aggregatedData.lastMessage.sentAt || new Date(),
+      } : undefined,
+      participants: (aggregatedData.participants || []).map(p => this.mapAggregatedParticipantData(p)),
+      lastActivity: aggregatedData.lastActivity || new Date(),
+    };
+  }
+
+  private mapToParticipantInfo(participant: ConversationParticipantDocument): ParticipantInfo {
+    return {
+      conversationId: participant.conversationId.toString(),
+      userId: participant.userId.toString(),
+      role: participant.role,
+      joinedAt: participant.joinedAt,
+      leftAt: participant.leftAt,
+      addedBy: participant.addedBy.toString(),
+      settings: participant.settings,
     };
   }
 
@@ -1061,6 +1168,33 @@ export class ConversationRepository implements IConversationRepository {
       addedBy: participant.addedBy.toString(),
       isActive: !participant.leftAt, // Active if leftAt is not set
       settings: participant.settings,
+    };
+  }
+
+  /**
+   * Map aggregated participant data with user details
+   */
+  private mapAggregatedParticipantData(participantData: any): ParticipantInfo {
+    // Debug log to check participant data structure
+    this.logger.debug('Mapping participant data:', {
+      userId: participantData.userId,
+      role: participantData.role,
+      hasUserDetails: !!participantData.userDetails
+    });
+
+    return {
+      conversationId: participantData.conversationId?.toString() || '',
+      userId: participantData.userId?.toString() || '',
+      role: participantData.role || 'member',
+      joinedAt: participantData.joinedAt || new Date(),
+      leftAt: participantData.leftAt || undefined,
+      addedBy: participantData.addedBy?.toString() || '',
+      settings: participantData.settings || {
+        isMuted: false,
+        isArchived: false,
+        isPinned: false,
+        notificationLevel: 'all'
+      }
     };
   }
 
@@ -1088,6 +1222,43 @@ export class ConversationRepository implements IConversationRepository {
 
     } finally {
       session.endSession();
+    }
+  }
+
+  /**
+   * Get participants count
+   */
+  async getParticipantsCount(conversationId: string): Promise<number> {
+    try {
+      const count = await this.participantModel.countDocuments({
+        conversationId: new Types.ObjectId(conversationId),
+        leftAt: null // Active participants only
+      });
+
+      return count;
+
+    } catch (error) {
+      this.logger.error(`Failed to get participants count: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Count admins in conversation
+   */
+  async countAdmins(conversationId: string): Promise<number> {
+    try {
+      const count = await this.participantModel.countDocuments({
+        conversationId: new Types.ObjectId(conversationId),
+        role: ParticipantRole.ADMIN,
+        leftAt: null // Active participants only
+      });
+
+      return count;
+
+    } catch (error) {
+      this.logger.error(`Failed to count admins: ${error.message}`, error.stack);
+      throw error;
     }
   }
 }

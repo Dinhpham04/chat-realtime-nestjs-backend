@@ -5,4 +5,7 @@
  */
 
 export * from './prepare-conversation.dto';
-export * from './activate-conversation.dto';
+export * from './create-group-conversation.dto';
+export * from './update-conversation-metadata.dto';
+export * from './get-user-conversations-query.dto';
+export * from './participant-management.dto';

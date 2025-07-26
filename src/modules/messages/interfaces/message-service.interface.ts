@@ -23,11 +23,17 @@ import {
   PaginatedMessagesResponse,
   BulkOperationResponse
 } from '../dto';
-import { UserContext } from '../services/message-core.service';
 
 /**
  * Core Message Service Interface
  */
+
+export interface UserContext {
+  userId: string;
+  deviceId?: string;
+  conversationMemberships: string[]; // Conversation IDs user is member of
+  roles?: string[];
+}
 export interface IMessageService {
   /**
    * Send a new message

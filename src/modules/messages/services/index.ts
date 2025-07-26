@@ -7,8 +7,7 @@
  */
 
 // Core business logic services
-export * from './message-core.service';
+export * from './message.service';
 export * from './message-validation.service';
 
 // Export user context interface
-export { UserContext } from './message-core.service';

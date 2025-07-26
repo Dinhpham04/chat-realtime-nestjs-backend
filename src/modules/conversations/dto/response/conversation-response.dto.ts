@@ -123,20 +123,35 @@ export class ConversationResponseDto {
   })
   type: 'direct' | 'group';
 
+  @ApiPropertyOptional({ description: 'Conversation name (for groups)' })
+  name?: string;
+
+  @ApiPropertyOptional({ description: 'number of members in the group' })
+  memberNumbers?: number;
+
+  @ApiPropertyOptional({ description: 'Conversation description (for groups)' })
+  description?: string;
+
+  @ApiPropertyOptional({ description: 'Conversation avatar URL' })
+  avatarUrl?: string;
+
+  @ApiPropertyOptional({ description: 'avatarUrl member if group ' })
+  memberAvatarUrls?: string[];
+
   @ApiProperty({
     description: 'List of conversation participants',
     type: [ParticipantResponseDto]
   })
-  participants: ParticipantResponseDto[];
+  participants?: ParticipantResponseDto[];
 
   @ApiProperty({ description: 'ID of user who created the conversation' })
-  createdBy: string;
+  createdBy?: string;
 
   @ApiProperty({ description: 'Creation timestamp (ISO string)' })
-  createdAt: string;
+  createdAt?: string;
 
   @ApiProperty({ description: 'Last update timestamp (ISO string)' })
-  updatedAt: string;
+  updatedAt?: string;
 
   @ApiPropertyOptional({
     description: 'Last message in conversation',
@@ -145,10 +160,36 @@ export class ConversationResponseDto {
   lastMessage?: MessageSummaryDto;
 
   @ApiProperty({ description: 'Whether conversation is active (has messages)' })
-  isActive: boolean;
+  isActive?: boolean;
 
   @ApiProperty({ description: 'Number of unread messages for current user' })
-  unreadCount: number;
+  unreadCount?: number;
+
+  @ApiProperty({ description: 'Group settings (for group conversations)' })
+  settings?: {
+    allowMemberInvite: boolean;
+    allowMemberLeave: boolean;
+    requireAdminApproval: boolean;
+    maxParticipants: number;
+    isPublic: boolean;
+  };
+
+  @ApiProperty({ description: 'Conversation status flags' })
+  status?: {
+    isActive: boolean;
+    isArchived: boolean;
+    isPinned: boolean;
+  };
+
+  @ApiProperty({ description: 'User permissions in this conversation' })
+  permissions?: {
+    canSendMessages: boolean;
+    canAddMembers: boolean;
+    canRemoveMembers: boolean;
+    canEditGroup: boolean;
+    canDeleteGroup: boolean;
+    isAdmin: boolean;
+  };
 }
 
 // Mention data in message content

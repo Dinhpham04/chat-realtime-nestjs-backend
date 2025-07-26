@@ -74,14 +74,7 @@ export enum FontSize {
 /**
  * Basic conversation information
  */
-export interface ConversationInfo {
-  readonly type: ConversationType;
-  readonly createdBy: string; // User ID as string for flexibility
-  readonly isActive: boolean;
-  readonly name?: string;
-  readonly description?: string;
-  readonly avatarUrl?: string;
-}
+
 
 /**
  * Participant settings within conversation
@@ -318,6 +311,7 @@ export interface ConversationWithParticipants {
   readonly lastMessage?: LastMessageInfo;
   readonly participants: ParticipantInfo[];
   readonly settings?: ConversationSettingsInfo;
+  readonly lastActivity: Date;
 }
 
 /**
@@ -351,24 +345,17 @@ export interface ParticipantData {
 }
 
 /**
- * Paginated conversation response
+ * Participant data with populated user details (for aggregated queries)
  */
-export interface ConversationListResponse {
-  readonly conversations: ConversationInfo[];
-  readonly total: number;
-  readonly hasMore: boolean;
-  readonly nextOffset?: number;
-}
-
-/**
- * Conversation with participant count
- */
-export interface ConversationWithStats {
-  readonly conversation: ConversationInfo;
-  readonly participantCount: number;
-  readonly activeParticipantCount: number;
-  readonly lastMessage?: LastMessageInfo;
-  readonly userReadStatus?: ReadStatus;
+export interface ParticipantWithUserData extends ParticipantData {
+  readonly user?: {
+    readonly id: string;
+    readonly username: string;
+    readonly fullName: string;
+    readonly avatarUrl?: string;
+    readonly isOnline: boolean;
+    readonly lastSeen?: Date;
+  };
 }
 
 // =============== TYPE GUARDS ===============
