@@ -7,7 +7,7 @@ Redis-based real-time state management for mobile-first chat application. Optimi
 ## 🏗️ **Architecture**
 
 ```
-Client Apps    ←→    WebSocket    ←→    Redis     ←→    MongoDB
+Client Apps    ←→    Socket.IO    ←→    Redis     ←→    MongoDB
 (Mobile/Web)         Gateway           (Cache)         (Persistence)
      ↓                  ↓                ↓               ↓
 UI State          Connection       Real-time        Permanent

@@ -1,55 +1,50 @@
-import { Module } from "@nestjs/common";
-import { MongooseModule } from "@nestjs/mongoose";
-import { Message, MessageSchema, MessageStatus, MessageStatusSchema } from "./schemas";
-import { UsersModule } from "../users";
-import { MessageRepository } from "./repositories";
-import { MessageService } from "./services";
+import { Module, forwardRef } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { MessagesService } from './services/messages.service';
+import { MessagesController } from './controllers/messages.controller';
+import { MessageRepository } from './repositories/message.repository';
+import { Message, MessageSchema } from './schemas/message.schema';
+import { AuthModule } from '../auth/auth.module';
+import { ConversationsModule } from '../conversations/conversations.module';
+import { UsersModule } from '../users';
+
+/**
+ * Messages Module
+ *
+ * 🎯 Purpose: Messages functionality with Socket.IO integration
+ * 📱 Mobile-First: Real-time messaging with REST API support
+ * 🚀 Clean Architecture: Service-Repository pattern with dependency injection
+ *
+ * Features:
+ * - Send/receive messages in real-time
+ * - Message editing and deletion
+ * - Read receipts and delivery status
+ * - Message search and pagination
+ * - Bulk operations
+ * - Message forwarding
+ * - Analytics and insights
+ */
 
 @Module({
     imports: [
-        // MongoDB Schemas Registration
         MongooseModule.forFeature([
-            { name: Message.name, schema: MessageSchema },
-            { name: MessageStatus.name, schema: MessageStatusSchema },
-
+            { name: Message.name, schema: MessageSchema }
         ]),
-
-        // External Module Dependencies
-        UsersModule
+        EventEmitterModule.forRoot(), // Fix EventEmitter injection
+        AuthModule, // Import Auth module for authentication
+        UsersModule,
+        forwardRef(() => ConversationsModule) // Import Conversations module for membership validation
     ],
-
-    controllers: [
-    ],
-
+    controllers: [MessagesController],
     providers: [
-        // Repository Implementations
+        MessagesService,
         MessageRepository,
-
-        // Service Implementations
-        MessageService,
-
-        // Interface Bindings for Dependency Injection
         {
             provide: 'IMessageRepository',
-            useClass: MessageRepository,
-        },
-
-        {
-            provide: 'IMessageService',
-            useClass: MessageService,
+            useClass: MessageRepository
         }
     ],
-
-    exports: [
-        // Export schemas for other modules
-        MongooseModule,
-
-        // Export repositories for other services
-        MessageRepository,
-        'IMessageRepository',
-
-        MessageService,
-        'IMessageService',
-    ],
+    exports: [MessagesService, MessageRepository] // Export for Socket.IO Gateway use
 })
 export class MessagesModule { }

@@ -26,8 +26,6 @@ import {
 import { IUsersService } from '../../users/services/interfaces/users-service.interface';
 import { IConversationRepository } from '../repositories/interfaces/conversation-repository.interface';
 import { ConversationType, ParticipantRole, CreateConversationData, UpdateConversationData, ConversationQuery, ConversationWithParticipants, AddParticipantData } from '../types/conversation.types';
-import { IMessageService } from 'src/modules/messages/interfaces';
-import { MessageService } from 'src/modules/messages/services';
 
 @Injectable()
 export class ConversationsService implements IConversationsService {
@@ -39,9 +37,6 @@ export class ConversationsService implements IConversationsService {
 
     @Inject('IUsersService')
     private readonly usersService: IUsersService,
-
-    // @Inject(forwardRef(() => 'IMessagesService'))
-    // private readonly messagesService: MessageService
   ) { }
 
   /**
@@ -898,6 +893,25 @@ export class ConversationsService implements IConversationsService {
     } catch (error) {
       this.logger.error(`Failed to leave conversation ${conversationId}:`, error.stack);
       throw error;
+    }
+  }
+
+  /**
+   * Check if user is member of conversation
+   * Used by Messages module for authorization
+   */
+  async isUserMemberOfConversation(userId: string, conversationId: string): Promise<boolean> {
+    try {
+      this.logger.debug(`Checking if user ${userId} is member of conversation ${conversationId}`);
+
+      const isMember = await this.conversationRepository.isUserParticipant(conversationId, userId);
+
+      this.logger.debug(`User ${userId} ${isMember ? 'is' : 'is not'} member of conversation ${conversationId}`);
+      return isMember;
+
+    } catch (error) {
+      this.logger.error(`Failed to check membership for user ${userId} in conversation ${conversationId}:`, error);
+      return false; // Fail safe - deny access on error
     }
   }
 }

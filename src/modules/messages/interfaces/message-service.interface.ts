@@ -1,10 +1,10 @@
 /**
  * Message Service Interface
- * 
+ *
  * 🎯 Purpose: Define contract for message business logic operations
  * 📱 Mobile-First: Comprehensive message operations for real-time apps
  * 🚀 Clean Architecture: Service layer abstraction for dependency injection
- * 
+ *
  * Design Principles:
  * - Single Responsibility: Only message business logic contract
  * - Interface Segregation: Focused service operations
@@ -13,44 +13,49 @@
  */
 
 import {
-  SendMessageDto,
-  EditMessageDto,
+  CreateMessageDto,
+  UpdateMessageDto,
   MessagePaginationDto,
   MessageSearchDto,
   UpdateMessageStatusDto,
   BulkMessageOperationDto,
-  MessageResponse,
-  PaginatedMessagesResponse,
-  BulkOperationResponse
+  MessageResponseDto,
+  PaginatedMessagesResponseDto,
+  BulkOperationResponseDto
 } from '../dto';
 
 /**
  * Core Message Service Interface
  */
 
+/**
+ * User Context for Message Operations
+ * Following Clean Architecture - minimal context for identity only
+ * Authorization is handled by domain services, not pre-loaded here
+ */
 export interface UserContext {
   userId: string;
   deviceId?: string;
-  conversationMemberships: string[]; // Conversation IDs user is member of
   roles?: string[];
 }
+
 export interface IMessageService {
   /**
    * Send a new message
    */
   sendMessage(
-    dto: SendMessageDto,
+    dto: CreateMessageDto,
     userContext: UserContext
-  ): Promise<MessageResponse>;
+  ): Promise<MessageResponseDto>;
 
   /**
    * Edit an existing message
    */
   editMessage(
     messageId: string,
-    dto: EditMessageDto,
+    dto: UpdateMessageDto,
     userContext: UserContext
-  ): Promise<MessageResponse>;
+  ): Promise<MessageResponseDto>;
 
   /**
    * Delete a message (soft delete)
@@ -67,7 +72,7 @@ export interface IMessageService {
     conversationId: string,
     pagination: MessagePaginationDto,
     userContext: UserContext
-  ): Promise<PaginatedMessagesResponse>;
+  ): Promise<PaginatedMessagesResponseDto>;
 
   /**
    * Mark message as read
@@ -89,7 +94,7 @@ export interface IExtendedMessageService extends IMessageService {
     conversationId: string,
     searchDto: MessageSearchDto,
     userContext: UserContext
-  ): Promise<PaginatedMessagesResponse>;
+  ): Promise<PaginatedMessagesResponseDto>;
 
   /**
    * Update message delivery status
@@ -106,7 +111,7 @@ export interface IExtendedMessageService extends IMessageService {
   bulkOperation(
     dto: BulkMessageOperationDto,
     userContext: UserContext
-  ): Promise<BulkOperationResponse>;
+  ): Promise<BulkOperationResponseDto>;
 
   /**
    * Forward message to other conversations
@@ -115,7 +120,7 @@ export interface IExtendedMessageService extends IMessageService {
     messageId: string,
     conversationIds: string[],
     userContext: UserContext
-  ): Promise<MessageResponse[]>;
+  ): Promise<MessageResponseDto[]>;
 
   /**
    * Get message analytics for conversation
@@ -138,14 +143,14 @@ export interface IMessageValidationService {
   /**
    * Validate send message DTO
    */
-  validateSendMessage(dto: SendMessageDto): Promise<void>;
+  validateSendMessage(dto: CreateMessageDto): Promise<void>;
 
   /**
    * Validate edit message DTO
    */
   validateEditMessage(
     messageType: string,
-    dto: EditMessageDto
+    dto: UpdateMessageDto
   ): Promise<void>;
 
   /**

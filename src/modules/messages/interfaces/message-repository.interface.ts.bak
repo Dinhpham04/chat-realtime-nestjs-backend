@@ -1,0 +1,161 @@
+/**
+ * Message Repository Interface
+ *
+ * 🎯 Purpose: Define contract for message data operations
+ * 📱 Mobile-First: Optimized for real-time messaging persistence
+ * 🚀 Clean Architecture: Repository pattern abstraction
+ *
+ * Design Principles:
+ * - Single Responsibility: Only message data operations
+ * - Interface Segregation: Focused repository operations
+ * - Dependency Inversion: Service depends on this abstraction
+ * - DRY: Reuse DTOs and types for consistent interfaces
+ */
+
+import { MessageResponseDto, MessagePaginationDto, MessageSearchDto } from '../dto';
+import { Message } from '../types';
+
+/**
+ * Pagination result interface
+ */
+export interface PaginationResult<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+    nextCursor?: string;
+    prevCursor?: string;
+  };
+}
+
+/**
+ * Message filter options
+ */
+export interface MessageFilterOptions {
+  conversationId?: string;
+  senderId?: string;
+  messageType?: string;
+  status?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+  hasAttachments?: boolean;
+}
+
+/**
+ * Bulk operation result
+ */
+export interface BulkUpdateResult {
+  matchedCount: number;
+  modifiedCount: number;
+  upsertedCount: number;
+  deletedCount: number;
+}
+
+/**
+ * Core Message Repository Interface
+ */
+export interface IMessageRepository {
+  /**
+   * Create a new message
+   */
+  create(messageData: Partial<Message>): Promise<MessageResponseDto>;
+
+  /**
+   * Find message by ID
+   */
+  findById(messageId: string): Promise<MessageResponseDto | null>;
+
+  /**
+   * Find messages by conversation with pagination
+   */
+  findByConversationId(
+    conversationId: string,
+    pagination: MessagePaginationDto
+  ): Promise<PaginationResult<MessageResponseDto>>;
+
+  /**
+   * Update message
+   */
+  update(messageId: string, updateData: Partial<Message>): Promise<MessageResponseDto | null>;
+
+  /**
+   * Soft delete message
+   */
+  softDelete(messageId: string): Promise<boolean>;
+
+  /**
+   * Hard delete message
+   */
+  delete(messageId: string): Promise<boolean>;
+
+  /**
+   * Search messages
+   */
+  search(
+    conversationId: string,
+    searchDto: MessageSearchDto
+  ): Promise<PaginationResult<MessageResponseDto>>;
+
+  /**
+   * Mark message as read by user
+   */
+  markAsRead(messageId: string, userId: string): Promise<boolean>;
+
+  /**
+   * Update message status
+   */
+  updateStatus(messageId: string, status: string): Promise<boolean>;
+
+  /**
+   * Get message analytics for conversation
+   */
+  getAnalytics(conversationId: string): Promise<{
+    totalMessages: number;
+    messagesPerDay: number;
+    mostActiveUsers: Array<{ userId: string; messageCount: number }>;
+    messageTypeDistribution: Record<string, number>;
+  }>;
+}
+
+/**
+ * Extended Message Repository Interface
+ */
+export interface IExtendedMessageRepository extends IMessageRepository {
+  /**
+   * Bulk operations
+   */
+  bulkDelete(messageIds: string[]): Promise<BulkUpdateResult>;
+  bulkMarkAsRead(messageIds: string[], userId: string): Promise<BulkUpdateResult>;
+  bulkUpdateStatus(messageIds: string[], status: string): Promise<BulkUpdateResult>;
+
+  /**
+   * Find messages with advanced filters
+   */
+  findWithFilters(
+    filters: MessageFilterOptions,
+    pagination: MessagePaginationDto
+  ): Promise<PaginationResult<MessageResponseDto>>;
+
+  /**
+   * Get conversation statistics
+   */
+  getConversationStats(conversationId: string): Promise<{
+    totalMessages: number;
+    unreadMessages: number;
+    lastMessage: MessageResponseDto | null;
+    participants: string[];
+  }>;
+
+  /**
+   * Get user message statistics
+   */
+  getUserStats(userId: string): Promise<{
+    totalSent: number;
+    totalReceived: number;
+    activeConversations: number;
+    lastActivity: Date | null;
+  }>;
+}

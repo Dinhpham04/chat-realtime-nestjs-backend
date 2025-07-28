@@ -18,6 +18,7 @@ import {
   RequestIdMiddleware,
 } from './shared';
 import { FriendsModule } from './modules/friends/friends.module';
+import { SocketModule } from './socket/socket.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { FriendsModule } from './modules/friends/friends.module';
     }),
     DatabaseModule,
     RedisModule,
+    SocketModule,
     UsersModule,
     AuthModule,
     ConversationsModule,

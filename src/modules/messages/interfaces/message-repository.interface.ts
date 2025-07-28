@@ -1,297 +1,129 @@
 /**
  * Message Repository Interface
- * 
- * 🎯 Purpose: Define contract for message data operations
- * 📱 Mobile-First: Optimized for real-time messaging performance
- * 🚀 Clean Architecture: Repository pattern with dependency inversion
- * 
+ *
+ * 🎯 Purpose: Define contract for message persistence operations
+ * 📱 Mobile-First: Repository interface for real-time messaging
+ * 🚀 Clean Architecture: Repository pattern abstraction layer
+ *
  * Design Principles:
- * - Single Responsibility: Only message data operations
- * - Interface Segregation: Focused on message domain
- * - Dependency Inversion: Services depend on abstraction, not implementation
- * - DRY: Reuse types from message.types.ts (Single Source of Truth)
+ * - Interface Segregation: Focused on message persistence only
+ * - Dependency Inversion: Abstract repository interface  
+ * - Single Responsibility: Data access operations for messages
+ * - Performance: Optimized operations for mobile messaging
  */
 
-import { Types } from 'mongoose';
-import { Message, MessageStatus } from '../schemas';
-import {
-  // Core interfaces from message.types.ts
-  CreateMessageData,
-  UpdateMessageData,
-  MessageQuery,
-  MessagePaginationOptions,
-  MessageListResponse,
-  MessageWithDetails,
-  MessageSearchOptions,
-  MessageDeliveryStatus,
-  MessageStatus as MessageStatusEnum,
-  MessageDeliverySummary,
-  MessageStatusUpdate,
-  MessageListItem
-} from '../types/message.types';
+import { MessageDocument } from '../schemas/message.schema';
+import { Message } from '../schemas/message.schema';
+import { PaginatedResponse, MessageFilter } from '../types';
+import { MessageSearchDto } from '../dto';
 
-// =============== REPOSITORY-SPECIFIC TYPES ===============
-// Only define types that are specific to repository layer and not in message.types.ts
-
-/**
- * Repository pagination params (extends base MessagePaginationOptions)
- */
-export interface RepositoryPaginationParams extends MessagePaginationOptions {
-  cursor?: string; // Add cursor support
-  sortDirection?: 'asc' | 'desc'; // Add sort direction
-  includeDeleted?: boolean;
-  includeSystemMessages?: boolean;
-}
-
-/**
- * Repository search query (extends MessageSearchOptions)
- */
-export interface RepositorySearchQuery extends MessageSearchOptions {
-  conversationId?: string; // Add conversation context
-  includeDeleted?: boolean;
-  sortBy?: 'createdAt' | 'updatedAt';
-  sortOrder?: 'asc' | 'desc';
-  cursor?: string; // Add cursor for pagination
-  fromDate?: Date; // Add date filters
-  toDate?: Date;
-  hasAttachments?: boolean; // Add attachment filter
-  sortDirection?: 'asc' | 'desc'; // Add sort direction
-}
-
-/**
- * Bulk operation result (Repository specific)
- */
-export interface BulkOperationResult {
-  success: boolean;
-  modifiedCount: number;
-  errors?: string[];
-}
-
-/**
- * Message with attachments (for future Files integration)
- * Uses MessageWithDetails as base but with repository-specific extensions
- */
-export interface MessageWithAttachments extends MessageWithDetails {
-  // Will be extended when Files module is integrated
-}
-
-// =============== REPOSITORY INTERFACE ===============
-
-/**
- * Message Repository Interface
- * 
- * Core Responsibilities:
- * 1. CRUD Operations - Basic message management
- * 2. Conversation Queries - Get messages by conversation
- * 3. Search & Filter - Advanced query operations
- * 4. Status Management - Delivery and read status
- * 5. Bulk Operations - Performance optimizations
- * 
- * Uses types from message.types.ts (Single Source of Truth)
- */
 export interface IMessageRepository {
-  // =============== CRUD OPERATIONS ===============
+  // =============== BASIC CRUD OPERATIONS ===============
 
   /**
-   * Create new message
-   * @param messageData Message creation data from message.types.ts
-   * @returns Created message
-   * @throws RepositoryError if creation fails
+   * Create a new message
    */
-  create(messageData: CreateMessageData): Promise<Message>;
+  create(data: Partial<Message>): Promise<MessageDocument>;
 
   /**
    * Find message by ID
-   * @param messageId Message identifier
-   * @returns Message or null if not found
    */
-  findById(messageId: string): Promise<Message | null>;
+  findById(id: string): Promise<MessageDocument | null>;
 
   /**
    * Update message by ID
-   * @param messageId Message identifier
-   * @param updateData Fields to update from message.types.ts
-   * @returns Updated message
-   * @throws RepositoryError if message not found or update fails
    */
-  update(messageId: string, updateData: UpdateMessageData): Promise<Message>;
+  updateById(id: string, data: Partial<Message>): Promise<MessageDocument | null>;
 
   /**
-   * Soft delete message (mark as deleted)
-   * @param messageId Message identifier
-   * @returns Success status
+   * Soft delete message
    */
-  softDelete(messageId: string): Promise<boolean>;
+  softDelete(id: string): Promise<boolean>;
 
-  /**
-   * Hard delete message (permanent removal)
-   * @param messageId Message identifier
-   * @returns Success status
-   */
-  hardDelete(messageId: string): Promise<boolean>;
-
-  // =============== CONVERSATION QUERIES ===============
+  // =============== CONVERSATION OPERATIONS ===============
 
   /**
    * Find messages by conversation with pagination
-   * Uses MessageListResponse from message.types.ts
-   * @param conversationId Conversation identifier
-   * @param options Pagination options from message.types.ts
-   * @returns Paginated messages
    */
-  findByConversation(
+  findByConversationId(
     conversationId: string,
-    options: RepositoryPaginationParams
-  ): Promise<MessageListResponse>;
-
-  /**
-   * Get latest message in conversation
-   * @param conversationId Conversation identifier
-   * @returns Latest message or null
-   */
-  getLatestMessage(conversationId: string): Promise<Message | null>;
+    pagination: {
+      page?: number;
+      limit?: number;
+      cursor?: string;
+    }
+  ): Promise<PaginatedResponse<MessageDocument>>;
 
   /**
    * Count messages in conversation
-   * @param conversationId Conversation identifier
-   * @param includeDeleted Include soft-deleted messages
-   * @returns Message count
    */
-  countByConversation(conversationId: string, includeDeleted?: boolean): Promise<number>;
-
-  // =============== ADVANCED QUERIES ===============
+  countByConversationId(conversationId: string): Promise<number>;
 
   /**
-   * Find message with attachments (for future Files integration)
-   * Uses MessageWithDetails from message.types.ts
-   * @param messageId Message identifier
-   * @returns Message with populated attachments
+   * Find latest message in conversation
    */
-  findWithAttachments(messageId: string): Promise<MessageWithAttachments | null>;
-
-  /**
-   * Find replies to a message
-   * @param parentMessageId Parent message identifier
-   * @returns Array of reply messages
-   */
-  findReplies(parentMessageId: string): Promise<Message[]>;
-
-  /**
-   * Search messages with filters
-   * Uses RepositorySearchQuery (extends MessageSearchOptions)
-   * @param query Search parameters
-   * @returns Paginated search results
-   */
-  searchMessages(query: RepositorySearchQuery): Promise<MessageListResponse>;
-
-  /**
-   * Find messages by sender
-   * @param senderId Sender identifier
-   * @param options Pagination parameters
-   * @returns Paginated messages using MessageListResponse
-   */
-  findBySender(senderId: string, options: RepositoryPaginationParams): Promise<MessageListResponse>;
+  findLatestInConversation(conversationId: string): Promise<MessageDocument | null>;
 
   // =============== STATUS OPERATIONS ===============
 
   /**
-   * Update message delivery status
-   * Uses MessageDeliveryStatus from message.types.ts
-   * @param messageId Message identifier
-   * @param userId User identifier
-   * @param status Delivery status from message.types.ts
-   * @param deviceId Optional device identifier
-   * @returns Success status
+   * Mark message as read
    */
-  updateDeliveryStatus(
-    messageId: string,
-    userId: string,
-    status: MessageDeliveryStatus,
-    deviceId?: string
-  ): Promise<boolean>;
+  markAsRead(messageId: string, userId: string): Promise<boolean>;
 
   /**
-   * Get message status for user
-   * @param messageId Message identifier
-   * @param userId User identifier
-   * @returns Message status or null
+   * Update message status
    */
-  getMessageStatus(messageId: string, userId: string): Promise<MessageStatus | null>;
+  updateStatus(messageId: string, status: string, timestamp?: Date): Promise<boolean>;
+
+  // =============== SEARCH OPERATIONS ===============
 
   /**
-   * Get all statuses for a message
-   * @param messageId Message identifier
-   * @returns Array of message statuses
+   * Search messages in conversation
    */
-  getAllMessageStatuses(messageId: string): Promise<MessageStatus[]>;
+  searchInConversation(
+    conversationId: string,
+    searchDto: MessageSearchDto
+  ): Promise<PaginatedResponse<MessageDocument>>;
 
   /**
-   * Mark multiple messages as read for user
-   * Uses MessageStatusUpdate from message.types.ts
-   * @param messageIds Array of message identifiers
-   * @param userId User identifier
-   * @returns Bulk operation result
+   * Find messages with filter
    */
-  markMultipleAsRead(messageIds: string[], userId: string): Promise<BulkOperationResult>;
+  findWithFilter(filter: MessageFilter): Promise<MessageDocument[]>;
 
   // =============== BULK OPERATIONS ===============
 
   /**
-   * Create multiple messages (for system messages, imports)
-   * @param messagesData Array of message creation data
-   * @returns Array of created messages
+   * Bulk mark messages as read
    */
-  createMultiple(messagesData: CreateMessageData[]): Promise<Message[]>;
+  bulkMarkAsRead(messageIds: string[], userId: string): Promise<number>;
 
   /**
-   * Soft delete multiple messages
-   * @param messageIds Array of message identifiers
-   * @returns Bulk operation result
+   * Bulk delete messages
    */
-  softDeleteMultiple(messageIds: string[]): Promise<BulkOperationResult>;
+  bulkDelete(messageIds: string[]): Promise<number>;
+
+  // =============== USER OPERATIONS ===============
 
   /**
-   * Update multiple messages
-   * @param updates Array of {messageId, updateData}
-   * @returns Bulk operation result
+   * Find unread messages for user
    */
-  updateMultiple(updates: Array<{ messageId: string; updateData: UpdateMessageData }>): Promise<BulkOperationResult>;
-
-  // =============== ANALYTICS & REPORTING ===============
+  findUnreadByUser(userId: string): Promise<MessageDocument[]>;
 
   /**
-   * Get message statistics for conversation
-   * @param conversationId Conversation identifier
-   * @param dateFrom Optional start date
-   * @param dateTo Optional end date
-   * @returns Message statistics
+   * Find messages by sender
    */
-  getConversationStats(
-    conversationId: string,
-    dateFrom?: Date,
-    dateTo?: Date
-  ): Promise<{
+  findBySenderId(senderId: string, limit?: number): Promise<MessageDocument[]>;
+
+  // =============== ANALYTICS OPERATIONS ===============
+
+  /**
+   * Get message analytics for conversation
+   */
+  getConversationAnalytics(conversationId: string): Promise<{
     totalMessages: number;
-    messagesByType: Record<string, number>;
-    messagesBySender: Record<string, number>;
-    deletedMessages: number;
-  }>;
-
-  /**
-   * Get user messaging activity
-   * Uses patterns from MessageDeliverySummary type structure
-   * @param userId User identifier
-   * @param dateFrom Optional start date
-   * @param dateTo Optional end date
-   * @returns User activity statistics
-   */
-  getUserActivity(
-    userId: string,
-    dateFrom?: Date,
-    dateTo?: Date
-  ): Promise<{
-    messagesSent: number;
-    conversationsActive: number;
-    averageMessagesPerDay: number;
+    messagesPerDay: number;
+    mostActiveUsers: Array<{ userId: string; messageCount: number }>;
+    messageTypeDistribution: Record<string, number>;
   }>;
 }
