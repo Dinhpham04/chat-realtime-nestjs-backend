@@ -26,11 +26,11 @@ describe('ConversationsService', () => {
     expect(service).toBeDefined();
   });
 
-  it('should have prepareDirectConversation method', () => {
-    expect(service.prepareDirectConversation).toBeDefined();
+  it('should have createDirectConversation method', () => {
+    expect(service.createDirectConversation).toBeDefined();
   });
 
-  it('should have activateConversation method', () => {
-    expect(service.activateConversation).toBeDefined();
+  it('should have leaveConversation method', () => {
+    expect(service.leaveConversation).toBeDefined();
   });
 });

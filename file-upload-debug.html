@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Upload Debug Test</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        input[type="file"] {
+            margin: 10px 0;
+            padding: 5px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: #28a745;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🔧 File Upload Debug Test</h1>
+
+        <div id="connectionStatus" class="status disconnected">
+            Disconnected
+        </div>
+
+        <div>
+            <input type="file" id="fileInput" />
+            <button id="uploadBtn" onclick="uploadFile()" disabled>Upload File</button>
+            <button onclick="connectSocket()">Connect</button>
+            <button onclick="disconnectSocket()">Disconnect</button>
+            <button onclick="clearLogs()">Clear Logs</button>
+        </div>
+
+        <div class="progress-bar" id="progressContainer" style="display: none;">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+
+        <div id="uploadInfo" style="margin: 10px 0;"></div>
+
+        <h3>Connection & Upload Logs:</h3>
+        <div id="logContainer" class="log"></div>
+    </div>
+
+    <script>
+        let socket = null;
+        let isConnected = false;
+
+        // JWT token - thay thế bằng token thực tế của bạn
+        const JWT_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ODc4OTYwYzdkZDNiZDdiMTk2MDc2MzkiLCJlbWFpbCI6Im5ndXllbnZhbmFAZXhhbXBsZS5jb20iLCJwaG9uZU51bWJlciI6Iis4NDk4NzY1NDMyMSIsImRldmljZUlkIjoid2ViX3Rlc3RfN3UyOGhuNm80IiwiaWF0IjoxNzM4MDU0ODgwLCJleHAiOjE3Mzg0ODY4ODB9.CmfRKNpNhyQAu-LpFUdG7DDH2dP8TN_rGMZpZ-Ke-PE';
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.style.color = type === 'error' ? 'red' : type === 'success' ? 'green' : 'black';
+            logEntry.innerHTML = `[${timestamp}] ${message}`;
+
+            const logContainer = document.getElementById('logContainer');
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function updateStatus(status, message) {
+            const statusElement = document.getElementById('connectionStatus');
+            statusElement.className = `status ${status}`;
+            statusElement.textContent = message;
+
+            const uploadBtn = document.getElementById('uploadBtn');
+            uploadBtn.disabled = status !== 'connected';
+        }
+
+        function updateProgress(percentage) {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.getElementById('progressFill');
+
+            if (percentage > 0) {
+                progressContainer.style.display = 'block';
+                progressFill.style.width = percentage + '%';
+            } else {
+                progressContainer.style.display = 'none';
+                progressFill.style.width = '0%';
+            }
+        }
+
+        function connectSocket() {
+            if (socket && isConnected) {
+                log('Already connected to socket', 'info');
+                return;
+            }
+
+            log('Attempting to connect to file upload namespace...', 'info');
+
+            socket = io('http://localhost:3000/file-upload', {
+                auth: {
+                    token: JWT_TOKEN
+                },
+                transports: ['websocket', 'polling'],
+                timeout: 20000,
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionAttempts: 5
+            });
+
+            // Connection events
+            socket.on('connect', () => {
+                isConnected = true;
+                updateStatus('connected', `Connected (ID: ${socket.id})`);
+                log(`✅ Connected to file upload namespace with ID: ${socket.id}`, 'success');
+                log(`🔗 Transport: ${socket.io.engine.transport.name}`, 'info');
+            });
+
+            socket.on('disconnect', (reason) => {
+                isConnected = false;
+                updateStatus('disconnected', 'Disconnected');
+                log(`❌ Disconnected: ${reason}`, 'error');
+                updateProgress(0);
+            });
+
+            socket.on('connect_error', (error) => {
+                isConnected = false;
+                updateStatus('error', 'Connection Error');
+                log(`🚫 Connection error: ${error.message}`, 'error');
+            });
+
+            // File upload events
+            socket.on('upload_progress', (data) => {
+                log(`📈 Upload progress: ${data.progress}% (${data.uploadedBytes}/${data.totalBytes} bytes)`, 'info');
+                updateProgress(data.progress);
+            });
+
+            socket.on('upload_success', (data) => {
+                log(`✅ Upload successful! File ID: ${data.fileId}`, 'success');
+                log(`📄 File details: ${JSON.stringify(data, null, 2)}`, 'info');
+                updateProgress(100);
+                setTimeout(() => updateProgress(0), 3000);
+
+                const uploadInfo = document.getElementById('uploadInfo');
+                uploadInfo.innerHTML = `
+                    <strong>Upload Successful!</strong><br>
+                    File ID: ${data.fileId}<br>
+                    Original Name: ${data.originalName || 'N/A'}<br>
+                    Size: ${data.size || 'N/A'} bytes<br>
+                    Type: ${data.mimeType || 'N/A'}
+                `;
+            });
+
+            socket.on('upload_error', (error) => {
+                log(`❌ Upload error: ${error.message}`, 'error');
+                log(`🔍 Error details: ${JSON.stringify(error, null, 2)}`, 'error');
+                updateProgress(0);
+
+                const uploadInfo = document.getElementById('uploadInfo');
+                uploadInfo.innerHTML = `<strong style="color: red;">Upload Failed!</strong><br>${error.message}`;
+            });
+
+            socket.on('chunk_received', (data) => {
+                log(`📦 Chunk ${data.chunkNumber} received (${data.size} bytes)`, 'info');
+            });
+
+            // Monitor transport changes
+            socket.io.on('upgrade', () => {
+                log(`🔄 Transport upgraded to: ${socket.io.engine.transport.name}`, 'info');
+            });
+
+            socket.io.on('upgradeError', (error) => {
+                log(`⚠️ Transport upgrade error: ${error}`, 'error');
+            });
+        }
+
+        function disconnectSocket() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                isConnected = false;
+                updateStatus('disconnected', 'Disconnected');
+                log('🔌 Socket disconnected manually', 'info');
+            }
+        }
+
+        function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                log('❌ No file selected', 'error');
+                return;
+            }
+
+            if (!socket || !isConnected) {
+                log('❌ Socket not connected', 'error');
+                return;
+            }
+
+            log(`📤 Starting upload: ${file.name} (${file.size} bytes, ${file.type})`, 'info');
+
+            const uploadInfo = document.getElementById('uploadInfo');
+            uploadInfo.innerHTML = `
+                <strong>Uploading...</strong><br>
+                Name: ${file.name}<br>
+                Size: ${file.size} bytes<br>
+                Type: ${file.type}
+            `;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const fileData = e.target.result;
+                const base64Data = fileData.split(',')[1]; // Remove data:... prefix
+
+                log(`📋 File read successfully, sending via WebSocket...`, 'info');
+
+                // Use upload_small_file event for all files in this debug test
+                socket.emit('upload_small_file', {
+                    fileName: file.name,
+                    fileData: base64Data,
+                    mimeType: file.type,
+                    size: file.size
+                });
+
+                log(`📡 File data sent to server`, 'info');
+            };
+
+            reader.onerror = function (error) {
+                log(`❌ Error reading file: ${error}`, 'error');
+            };
+
+            reader.readAsDataURL(file);
+        }
+
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+            document.getElementById('uploadInfo').innerHTML = '';
+            updateProgress(0);
+        }
+
+        // Auto-connect on page load
+        window.onload = function () {
+            log('🚀 File Upload Debug Test initialized', 'info');
+            log('🔑 JWT Token configured', 'info');
+            connectSocket();
+        };
+    </script>
+</body>
+
+</html>

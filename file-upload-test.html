@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Upload Test Client - Senior Architecture</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        /* Senior-level CSS: Mobile-first, Clean Design */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            min-height: 70vh;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .upload-section {
+            padding: 40px;
+            border-right: 1px solid #eee;
+        }
+
+        @media (max-width: 768px) {
+            .upload-section {
+                border-right: none;
+                border-bottom: 1px solid #eee;
+            }
+        }
+
+        .logs-section {
+            padding: 40px;
+            background: #f8f9fa;
+        }
+
+        .section-title {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 25px;
+            color: #2c3e50;
+        }
+
+        /* Authentication Section */
+        .auth-section {
+            background: #e3f2fd;
+            border: 2px solid #2196f3;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .auth-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #1976d2;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #dc3545;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.connected {
+            background: #28a745;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.1);
+                opacity: 0.7;
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        /* Input Controls */
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #555;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            min-height: 48px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        /* File Upload Area */
+        .upload-area {
+            border: 3px dashed #cbd5e0;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            background: #f7fafc;
+            transition: all 0.3s ease;
+            margin-bottom: 25px;
+            cursor: pointer;
+        }
+
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #eef2ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #667eea;
+            background: #e3f2fd;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            color: #a0aec0;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            font-size: 1.1rem;
+            color: #4a5568;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            font-size: 0.9rem;
+            color: #718096;
+        }
+
+        /* File Preview */
+        .file-preview {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .file-preview.visible {
+            display: block;
+        }
+
+        .file-info {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .file-icon {
+            width: 48px;
+            height: 48px;
+            background: #667eea;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+        }
+
+        .file-details h4 {
+            margin-bottom: 5px;
+            color: #2d3748;
+        }
+
+        .file-meta {
+            font-size: 0.9rem;
+            color: #718096;
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progress-container.visible {
+            display: block;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        /* Logs Section */
+        .logs-container {
+            background: #1a202c;
+            color: #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 4px 0;
+        }
+
+        .log-timestamp {
+            color: #a0aec0;
+            font-size: 0.8rem;
+        }
+
+        .log-level {
+            font-weight: 600;
+            margin: 0 8px;
+        }
+
+        .log-level.info {
+            color: #63b3ed;
+        }
+
+        .log-level.success {
+            color: #68d391;
+        }
+
+        .log-level.warning {
+            color: #fbd38d;
+        }
+
+        .log-level.error {
+            color: #fc8181;
+        }
+
+        .log-message {
+            color: #e2e8f0;
+        }
+
+        /* Upload Statistics */
+        .upload-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #718096;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 480px) {
+            .container {
+                margin: 10px;
+                border-radius: 8px;
+            }
+
+            .header {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 1.8rem;
+            }
+
+            .upload-section,
+            .logs-section {
+                padding: 20px;
+            }
+
+            .upload-area {
+                padding: 20px;
+            }
+        }
+
+        /* Animation Classes */
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+
+        @keyframes shake {
+
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+
+            25% {
+                transform: translateX(-5px);
+            }
+
+            75% {
+                transform: translateX(5px);
+            }
+        }
+
+        .bounce {
+            animation: bounce 0.6s ease-in-out;
+        }
+
+        @keyframes bounce {
+
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-10px);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🚀 File Upload Test Client</h1>
+            <p>Senior Architecture - Real-time WebSocket File Upload Testing</p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Upload Section -->
+            <div class="upload-section">
+                <h2 class="section-title">📁 File Upload</h2>
+
+                <!-- Authentication Section -->
+                <div class="auth-section">
+                    <div class="auth-title">
+                        🔐 Authentication & Connection
+                    </div>
+
+                    <div class="connection-status">
+                        <div class="status-indicator" id="connectionStatus"></div>
+                        <span id="connectionText">Disconnected</span>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" for="accessToken">Access Token</label>
+                        <input type="text" id="accessToken" class="input-field"
+                            placeholder="Enter your JWT access token..." autocomplete="off">
+                    </div>
+
+                    <div class="btn-group">
+                        <button class="btn btn-primary" id="connectBtn">
+                            🔌 Connect to Socket
+                        </button>
+                        <button class="btn btn-secondary" id="disconnectBtn" disabled>
+                            ❌ Disconnect
+                        </button>
+                    </div>
+                </div>
+
+                <!-- File Upload Area -->
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📎</div>
+                    <div class="upload-text">
+                        <strong>Drop files here or click to browse</strong>
+                    </div>
+                    <div class="upload-hint">
+                        Supports images, videos, documents, audio • Max 100MB
+                    </div>
+                    <input type="file" id="fileInput" style="display: none;" multiple>
+                </div>
+
+                <!-- File Preview -->
+                <div class="file-preview" id="filePreview">
+                    <div class="file-info">
+                        <div class="file-icon" id="fileIcon">📄</div>
+                        <div class="file-details">
+                            <h4 id="fileName">No file selected</h4>
+                            <div class="file-meta" id="fileMeta">Select a file to see details</div>
+                        </div>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div class="progress-container" id="progressContainer">
+                        <div class="progress-label">
+                            <span id="progressText">Uploading...</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                    </div>
+
+                    <div class="btn-group">
+                        <button class="btn btn-success" id="uploadBtn" disabled>
+                            ⬆️ Upload File
+                        </button>
+                        <button class="btn btn-danger" id="cancelBtn" disabled>
+                            🚫 Cancel Upload
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Upload Statistics -->
+                <div class="upload-stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalUploads">0</div>
+                        <div class="stat-label">Total Uploads</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="successfulUploads">0</div>
+                        <div class="stat-label">Successful</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="failedUploads">0</div>
+                        <div class="stat-label">Failed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalSize">0 MB</div>
+                        <div class="stat-label">Total Size</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs Section -->
+            <div class="logs-section">
+                <h2 class="section-title">📊 Real-time Logs</h2>
+                <div class="logs-container" id="logsContainer">
+                    <div class="log-entry">
+                        <span class="log-timestamp">[00:00:00]</span>
+                        <span class="log-level info">[INFO]</span>
+                        <span class="log-message">File Upload Test Client initialized</span>
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-secondary" id="clearLogsBtn">
+                        🗑️ Clear Logs
+                    </button>
+                    <button class="btn btn-secondary" id="exportLogsBtn">
+                        💾 Export Logs
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * File Upload Test Client - Senior Architecture
+         * 
+         * Features:
+         * - Clean Architecture patterns
+         * - Single Responsibility Principle
+         * - Error Boundary handling
+         * - Comprehensive logging
+         * - Mobile-first responsive design
+         * - Real-time WebSocket communication
+         * - Progress tracking and statistics
+         */
+
+        class FileUploadTestClient {
+            constructor() {
+                this.socket = null;
+                this.isConnected = false;
+                this.currentFile = null;
+                this.uploadSession = null;
+                this.healthCheckInterval = null;
+                this.statistics = {
+                    totalUploads: 0,
+                    successfulUploads: 0,
+                    failedUploads: 0,
+                    totalSize: 0
+                };
+
+                this.initializeEventListeners();
+                this.log('info', 'FileUploadTestClient initialized');
+            }
+
+            // ================ INITIALIZATION ================
+            initializeEventListeners() {
+                // Authentication events
+                document.getElementById('connectBtn').addEventListener('click', () => this.connectToSocket());
+                document.getElementById('disconnectBtn').addEventListener('click', () => this.disconnectFromSocket());
+
+                // File upload events
+                document.getElementById('uploadArea').addEventListener('click', () => document.getElementById('fileInput').click());
+                document.getElementById('uploadArea').addEventListener('dragover', this.handleDragOver.bind(this));
+                document.getElementById('uploadArea').addEventListener('dragleave', this.handleDragLeave.bind(this));
+                document.getElementById('uploadArea').addEventListener('drop', this.handleFileDrop.bind(this));
+
+                document.getElementById('fileInput').addEventListener('change', this.handleFileSelect.bind(this));
+                document.getElementById('uploadBtn').addEventListener('click', () => this.startUpload());
+                document.getElementById('cancelBtn').addEventListener('click', () => this.cancelUpload());
+
+                // Logs events
+                document.getElementById('clearLogsBtn').addEventListener('click', () => this.clearLogs());
+                document.getElementById('exportLogsBtn').addEventListener('click', () => this.exportLogs());
+
+                // Enter key for token input
+                document.getElementById('accessToken').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.connectToSocket();
+                });
+            }
+
+            // ================ SOCKET CONNECTION ================
+            async connectToSocket() {
+                const token = document.getElementById('accessToken').value.trim();
+
+                if (!token) {
+                    this.log('error', 'Access token is required for authentication');
+                    this.showError('Please enter your access token');
+                    return;
+                }
+
+                try {
+                    this.log('info', 'Connecting to file upload socket...');
+                    this.log('info', `Token length: ${token.length} characters`);
+                    this.log('info', `Token preview: ${token.substring(0, 20)}...`);
+                    this.updateConnectionStatus('connecting');
+
+                    // Connect to the file-upload namespace
+                    this.socket = io('http://localhost:3000/file-upload', {
+                        auth: { token },
+                        transports: ['websocket', 'polling'],
+                        timeout: 20000,  // Increased timeout
+                        reconnection: true,
+                        reconnectionAttempts: 5,  // More attempts
+                        reconnectionDelay: 2000,  // Longer delay
+                        reconnectionDelayMax: 5000,
+                        maxReconnectionAttempts: 5,
+                        forceNew: true,  // Force new connection
+                    });
+
+                    this.log('info', 'Socket.IO client created, setting up event listeners...');
+                    this.setupSocketEventListeners();
+
+                } catch (error) {
+                    this.log('error', `Connection failed: ${error.message}`);
+                    this.log('error', `Error stack: ${error.stack}`);
+                    this.updateConnectionStatus('disconnected');
+                    this.showError('Failed to connect to server');
+                }
+            }
+
+            setupSocketEventListeners() {
+                // Connection events
+                this.socket.on('connect', () => {
+                    this.isConnected = true;
+                    this.updateConnectionStatus('connected');
+                    this.log('success', `Connected to file upload socket: ${this.socket.id}`);
+                    this.log('info', `Socket transport: ${this.socket.io.engine.transport.name}`);
+
+                    // Start health check
+                    this.startConnectionHealthCheck();
+
+                    // Enable upload functionality
+                    this.updateUploadControls();
+                });
+
+                this.socket.on('disconnect', (reason) => {
+                    this.isConnected = false;
+                    this.updateConnectionStatus('disconnected');
+                    this.log('warning', `Disconnected from socket: ${reason}`);
+                    this.log('info', `Disconnect details: ${JSON.stringify({
+                        reason,
+                        transport: this.socket?.io?.engine?.transport?.name,
+                        readyState: this.socket?.io?.engine?.readyState
+                    })}`);
+
+                    // Stop health check
+                    this.stopConnectionHealthCheck();
+
+                    this.updateUploadControls();
+
+                    // Auto-reconnect for certain disconnect reasons
+                    if (reason === 'io server disconnect' || reason === 'transport close') {
+                        this.log('info', 'Attempting to reconnect in 3 seconds...');
+                        setTimeout(() => {
+                            if (!this.isConnected && this.socket) {
+                                this.socket.connect();
+                            }
+                        }, 3000);
+                    }
+                });
+
+                this.socket.on('connect_error', (error) => {
+                    this.log('error', `Connection error: ${error.message}`);
+                    this.log('error', `Error details: ${JSON.stringify({
+                        type: error.type,
+                        description: error.description,
+                        context: error.context,
+                        stack: error.stack?.split('\n')[0]
+                    })}`);
+                    this.updateConnectionStatus('error');
+                    this.showError('Authentication failed or server unavailable');
+                });
+
+                // Add more detailed error logging
+                this.socket.on('error', (error) => {
+                    this.log('error', `Socket error: ${error.message || error}`);
+                });
+
+                this.socket.io.on('error', (error) => {
+                    this.log('error', `IO error: ${error.message || error}`);
+                });
+
+                // Monitor reconnection attempts
+                this.socket.io.on('reconnect_attempt', (attemptNumber) => {
+                    this.log('info', `Reconnection attempt #${attemptNumber}`);
+                });
+
+                this.socket.io.on('reconnect', (attemptNumber) => {
+                    this.log('success', `Reconnected after ${attemptNumber} attempts`);
+                });
+
+                this.socket.io.on('reconnect_failed', () => {
+                    this.log('error', 'All reconnection attempts failed');
+                });
+
+                // File upload events
+                this.socket.on('upload_initiated', (data) => {
+                    this.log('success', `Upload initiated: ${data.sessionId}`);
+                    this.log('info', `Upload session data: ${JSON.stringify(data)}`);
+                    this.uploadSession = data;
+                    this.updateProgress(0, 'Upload started...');
+                });
+
+                this.socket.on('chunk_uploaded', (data) => {
+                    this.log('info', `Chunk ${data.chunkIndex + 1}/${data.totalChunks} uploaded (${data.progress}%)`);
+                    this.updateProgress(data.progress, `Uploading chunk ${data.chunkIndex + 1}/${data.totalChunks}...`);
+                });
+
+                this.socket.on('upload_completed', (data) => {
+                    this.log('success', `File upload completed: ${data.file.fileName}`);
+                    this.log('info', `Upload result: ${JSON.stringify(data)}`);
+                    this.handleUploadSuccess(data);
+                });
+
+                this.socket.on('small_file_uploaded', (data) => {
+                    this.log('success', `Small file uploaded: ${data.file.filename}`);
+                    this.log('info', `Small file result: ${JSON.stringify(data)}`);
+                    this.handleUploadSuccess(data);
+                });
+
+                this.socket.on('upload_progress', (data) => {
+                    this.updateProgress(data.progress, `Uploading... ${data.completedChunks}/${data.totalChunks} chunks`);
+                });
+
+                this.socket.on('upload_error', (error) => {
+                    this.log('error', `Upload error: ${error.error}`);
+                    this.log('error', `Error details: ${JSON.stringify(error)}`);
+                    this.handleUploadError(error);
+                });
+
+                this.socket.on('upload_cancelled', (data) => {
+                    this.log('warning', `Upload cancelled: ${data.reason}`);
+                    this.handleUploadCancelled();
+                });
+
+                // Add ping/pong handler for health check
+                this.socket.on('pong', (data) => {
+                    const latency = Date.now() - data.timestamp;
+                    this.log('info', `Ping response received - Latency: ${latency}ms`);
+                });
+            }
+
+            disconnectFromSocket() {
+                if (this.socket) {
+                    this.log('info', 'Manually disconnecting from socket...');
+                    this.socket.disconnect();
+                    this.socket = null;
+                }
+                this.isConnected = false;
+                this.updateConnectionStatus('disconnected');
+                this.log('info', 'Disconnected from socket');
+            }
+
+            // ================ CONNECTION HEALTH CHECK ================
+            startConnectionHealthCheck() {
+                // Check connection every 30 seconds
+                this.healthCheckInterval = setInterval(() => {
+                    if (this.socket && this.isConnected) {
+                        this.log('info', `Connection health check - Connected: ${this.socket.connected}, ID: ${this.socket.id}`);
+
+                        // Send ping to check if server is responsive
+                        this.socket.emit('ping', { timestamp: Date.now() });
+                    }
+                }, 30000);
+            }
+
+            stopConnectionHealthCheck() {
+                if (this.healthCheckInterval) {
+                    clearInterval(this.healthCheckInterval);
+                    this.healthCheckInterval = null;
+                }
+            }
+
+            // ================ FILE HANDLING ================
+            handleDragOver(e) {
+                e.preventDefault();
+                document.getElementById('uploadArea').classList.add('dragover');
+            }
+
+            handleDragLeave(e) {
+                e.preventDefault();
+                document.getElementById('uploadArea').classList.remove('dragover');
+            }
+
+            handleFileDrop(e) {
+                e.preventDefault();
+                document.getElementById('uploadArea').classList.remove('dragover');
+
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    this.selectFile(files[0]);
+                }
+            }
+
+            handleFileSelect(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    this.selectFile(file);
+                }
+            }
+
+            selectFile(file) {
+                this.currentFile = file;
+                this.log('info', `File selected: ${file.name} (${this.formatFileSize(file.size)})`);
+
+                // Update file preview
+                this.updateFilePreview(file);
+
+                // Show preview and enable upload button
+                document.getElementById('filePreview').classList.add('visible');
+                this.updateUploadControls();
+            }
+
+            updateFilePreview(file) {
+                // Update file icon based on type
+                const fileIcon = this.getFileIcon(file.type);
+                document.getElementById('fileIcon').textContent = fileIcon;
+
+                // Update file details
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileMeta').textContent =
+                    `${this.formatFileSize(file.size)} • ${file.type || 'Unknown type'}`;
+            }
+
+            getFileIcon(mimeType) {
+                if (mimeType.startsWith('image/')) return '🖼️';
+                if (mimeType.startsWith('video/')) return '🎥';
+                if (mimeType.startsWith('audio/')) return '🎵';
+                if (mimeType.includes('pdf')) return '📄';
+                if (mimeType.includes('word') || mimeType.includes('document')) return '📝';
+                if (mimeType.includes('sheet') || mimeType.includes('excel')) return '📊';
+                if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '📈';
+                if (mimeType.includes('zip') || mimeType.includes('rar')) return '📦';
+                return '📄';
+            }
+
+            // ================ UPLOAD LOGIC ================
+            async startUpload() {
+                if (!this.currentFile || !this.isConnected) {
+                    this.log('error', 'No file selected or not connected');
+                    return;
+                }
+
+                const file = this.currentFile;
+                const uploadId = this.generateUploadId();
+
+                this.log('info', `Starting upload for ${file.name}...`);
+                this.statistics.totalUploads++;
+                this.updateStatistics();
+
+                // Show progress
+                document.getElementById('progressContainer').classList.add('visible');
+                this.updateProgress(0, 'Preparing upload...');
+
+                // Disable upload button, enable cancel
+                document.getElementById('uploadBtn').disabled = true;
+                document.getElementById('cancelBtn').disabled = false;
+
+                try {
+                    // Check file size threshold (1MB = FILE_CONSTANTS.CHUNK_UPLOAD_THRESHOLD)
+                    const chunkThreshold = 1 * 1024 * 1024; // 1MB
+
+                    if (file.size >= chunkThreshold) {
+                        await this.uploadLargeFile(file, uploadId);
+                    } else {
+                        await this.uploadSmallFile(file, uploadId);
+                    }
+                } catch (error) {
+                    this.log('error', `Upload failed: ${error.message}`);
+                    this.handleUploadError({ error: error.message });
+                }
+            }
+
+            async uploadSmallFile(file, uploadId) {
+                this.log('info', `Uploading small file via single WebSocket message...`);
+
+                // Convert file to base64
+                const fileData = await this.fileToBase64(file);
+
+                const uploadData = {
+                    uploadId,
+                    fileName: file.name,
+                    fileSize: file.size,
+                    mimeType: file.type,
+                    fileData: fileData.split(',')[1], // Remove data URL prefix
+                    conversationId: null // Optional for testing
+                };
+
+                this.socket.emit('upload_small_file', uploadData);
+                this.updateProgress(50, 'Uploading file...');
+            }
+
+            async uploadLargeFile(file, uploadId) {
+                this.log('info', `Uploading large file via chunked upload...`);
+
+                // Step 1: Initiate upload
+                const initiateData = {
+                    uploadId,
+                    fileName: file.name,
+                    fileSize: file.size,
+                    mimeType: file.type,
+                    chunkSize: 2 * 1024 * 1024, // 2MB chunks
+                    conversationId: null
+                };
+
+                this.socket.emit('initiate_upload', initiateData);
+            }
+
+            async uploadFileChunks(file, sessionId, uploadId, chunkSize = 2 * 1024 * 1024) {
+                const totalChunks = Math.ceil(file.size / chunkSize);
+
+                this.log('info', `Uploading ${totalChunks} chunks of ${this.formatFileSize(chunkSize)} each`);
+
+                for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                    const start = chunkIndex * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    const chunk = file.slice(start, end);
+
+                    // Convert chunk to base64
+                    const chunkData = await this.fileToBase64(chunk);
+
+                    const chunkUploadData = {
+                        sessionId,
+                        uploadId,
+                        chunkIndex,
+                        chunkData: chunkData.split(',')[1] // Remove data URL prefix
+                    };
+
+                    this.socket.emit('upload_chunk', chunkUploadData);
+
+                    // Wait a bit to avoid overwhelming the server
+                    await this.sleep(100);
+                }
+
+                // Complete upload
+                const completeData = {
+                    sessionId,
+                    uploadId,
+                    fileName: file.name,
+                    conversationId: null
+                };
+
+                this.socket.emit('complete_upload', completeData);
+            }
+
+            cancelUpload() {
+                if (this.uploadSession) {
+                    this.socket.emit('cancel_upload', {
+                        sessionId: this.uploadSession.sessionId,
+                        uploadId: this.uploadSession.uploadId,
+                        reason: 'User cancelled'
+                    });
+                }
+                this.handleUploadCancelled();
+            }
+
+            // ================ UPLOAD EVENT HANDLERS ================
+            handleUploadSuccess(data) {
+                this.statistics.successfulUploads++;
+                this.statistics.totalSize += this.currentFile.size;
+                this.updateStatistics();
+
+                this.updateProgress(100, 'Upload completed successfully!');
+                this.log('success', `File uploaded successfully: ${data.file.filename || data.file.fileName}`);
+
+                // Reset upload state
+                setTimeout(() => this.resetUploadState(), 2000);
+            }
+
+            handleUploadError(error) {
+                this.statistics.failedUploads++;
+                this.updateStatistics();
+
+                this.updateProgress(0, `Upload failed: ${error.error}`);
+                this.showError(`Upload failed: ${error.error}`);
+
+                // Reset upload state
+                setTimeout(() => this.resetUploadState(), 3000);
+            }
+
+            handleUploadCancelled() {
+                this.updateProgress(0, 'Upload cancelled');
+                this.log('warning', 'Upload was cancelled');
+
+                // Reset upload state
+                setTimeout(() => this.resetUploadState(), 1000);
+            }
+
+            resetUploadState() {
+                this.uploadSession = null;
+                document.getElementById('progressContainer').classList.remove('visible');
+                document.getElementById('uploadBtn').disabled = false;
+                document.getElementById('cancelBtn').disabled = true;
+                this.updateUploadControls();
+            }
+
+            // ================ UI UPDATES ================
+            updateConnectionStatus(status) {
+                const statusIndicator = document.getElementById('connectionStatus');
+                const statusText = document.getElementById('connectionText');
+                const connectBtn = document.getElementById('connectBtn');
+                const disconnectBtn = document.getElementById('disconnectBtn');
+
+                switch (status) {
+                    case 'connected':
+                        statusIndicator.classList.add('connected');
+                        statusText.textContent = 'Connected';
+                        connectBtn.disabled = true;
+                        disconnectBtn.disabled = false;
+                        break;
+                    case 'connecting':
+                        statusIndicator.classList.remove('connected');
+                        statusText.textContent = 'Connecting...';
+                        connectBtn.disabled = true;
+                        disconnectBtn.disabled = true;
+                        break;
+                    case 'disconnected':
+                    default:
+                        statusIndicator.classList.remove('connected');
+                        statusText.textContent = 'Disconnected';
+                        connectBtn.disabled = false;
+                        disconnectBtn.disabled = true;
+                        break;
+                }
+            }
+
+            updateUploadControls() {
+                const uploadBtn = document.getElementById('uploadBtn');
+                const hasFile = this.currentFile !== null;
+                const isConnected = this.isConnected;
+
+                uploadBtn.disabled = !hasFile || !isConnected;
+            }
+
+            updateProgress(percentage, text) {
+                document.getElementById('progressFill').style.width = `${percentage}%`;
+                document.getElementById('progressPercent').textContent = `${Math.round(percentage)}%`;
+                document.getElementById('progressText').textContent = text;
+            }
+
+            updateStatistics() {
+                document.getElementById('totalUploads').textContent = this.statistics.totalUploads;
+                document.getElementById('successfulUploads').textContent = this.statistics.successfulUploads;
+                document.getElementById('failedUploads').textContent = this.statistics.failedUploads;
+                document.getElementById('totalSize').textContent = this.formatFileSize(this.statistics.totalSize);
+            }
+
+            // ================ LOGGING SYSTEM ================
+            log(level, message) {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement('div');
+                logEntry.className = 'log-entry';
+
+                logEntry.innerHTML = `
+                    <span class="log-timestamp">[${timestamp}]</span>
+                    <span class="log-level ${level}">[${level.toUpperCase()}]</span>
+                    <span class="log-message">${message}</span>
+                `;
+
+                const logsContainer = document.getElementById('logsContainer');
+                logsContainer.appendChild(logEntry);
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+
+            clearLogs() {
+                const logsContainer = document.getElementById('logsContainer');
+                logsContainer.innerHTML = '';
+                this.log('info', 'Logs cleared');
+            }
+
+            exportLogs() {
+                const logsContainer = document.getElementById('logsContainer');
+                const logs = Array.from(logsContainer.children).map(entry => entry.textContent).join('\n');
+
+                const blob = new Blob([logs], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `file-upload-logs-${new Date().toISOString().slice(0, 19)}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+
+                this.log('info', 'Logs exported successfully');
+            }
+
+            // ================ UTILITY METHODS ================
+            generateUploadId() {
+                return `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            }
+
+            formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+
+            async fileToBase64(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+            }
+
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            showError(message) {
+                // Simple error notification
+                const uploadArea = document.getElementById('uploadArea');
+                uploadArea.classList.add('shake');
+                setTimeout(() => uploadArea.classList.remove('shake'), 500);
+            }
+        }
+
+        // Initialize the application when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            // Listen for the upload_initiated event to start chunk uploads
+            window.fileUploadClient = new FileUploadTestClient();
+
+            // Handle upload_initiated event for chunked uploads
+            if (window.fileUploadClient.socket) {
+                window.fileUploadClient.socket.on('upload_initiated', async (data) => {
+                    if (window.fileUploadClient.currentFile && window.fileUploadClient.currentFile.size >= 1024 * 1024) {
+                        await window.fileUploadClient.uploadFileChunks(
+                            window.fileUploadClient.currentFile,
+                            data.sessionId,
+                            data.uploadId,
+                            data.chunkSize
+                        );
+                    }
+                });
+            }
+        });
+
+        // Setup the event listener when socket is connected
+        window.addEventListener('load', () => {
+            const originalConnect = FileUploadTestClient.prototype.setupSocketEventListeners;
+            FileUploadTestClient.prototype.setupSocketEventListeners = function () {
+                originalConnect.call(this);
+
+                // Add the upload_initiated handler for chunked uploads
+                this.socket.on('upload_initiated', async (data) => {
+                    if (this.currentFile && this.currentFile.size >= 1024 * 1024) {
+                        await this.uploadFileChunks(
+                            this.currentFile,
+                            data.sessionId,
+                            data.uploadId,
+                            data.chunkSize
+                        );
+                    }
+                });
+            };
+        });
+    </script>
+</body>
+
+</html>

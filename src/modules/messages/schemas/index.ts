@@ -18,7 +18,6 @@ export * from './message.schema';
 export * from './message-status.schema';
 
 // File management system
-export * from './message-attachment.schema';
 
 // User mentions and notifications
 export * from './message-mention.schema';

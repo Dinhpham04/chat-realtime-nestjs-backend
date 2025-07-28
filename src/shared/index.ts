@@ -2,6 +2,9 @@
  * Shared components for error handling and authentication
  */
 
+// Interfaces
+export * from './interfaces/redis-services.interface';
+
 // Exception Filters
 export * from './filters/global-exception.filter';
 

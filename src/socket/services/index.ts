@@ -3,3 +3,4 @@ export { MessageQueueService } from './message-queue.service';
 export { MessageOptimizationService } from './message-optimization.service';
 export { DeviceSyncService } from './device-sync.service';
 export { SocketCleanupService } from './socket-cleanup.service';
+export { FileChatIntegrationService } from './file-chat-integration.service';

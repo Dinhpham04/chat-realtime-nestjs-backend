@@ -7,6 +7,9 @@ import {
     RedisCleanupService
 } from './services';
 import { RedisHealthController } from './controllers/redis-health.controller';
+import { RedisChunkSessionService } from './services/redis-chunk-session.service';
+import { RedisDownloadTokenService } from './services/redis-download-token.service';
+
 const IOREDIS_CLIENT = 'IOREDIS_CLIENT';
 
 @Module({
@@ -29,12 +32,16 @@ const IOREDIS_CLIENT = 'IOREDIS_CLIENT';
         RealTimeStateService,
         RedisCacheService,
         RedisCleanupService,
+        RedisChunkSessionService,
+        RedisDownloadTokenService,
     ],
     exports: [
         IOREDIS_CLIENT,
         RealTimeStateService,
         RedisCacheService,
         RedisCleanupService,
+        RedisChunkSessionService,
+        RedisDownloadTokenService,
     ],
 })
 export class RedisModule { }

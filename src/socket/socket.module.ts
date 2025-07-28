@@ -6,7 +6,9 @@ import { AuthModule } from '../modules/auth/auth.module';
 import { UsersModule } from '../modules/users/users.module';
 import { ConversationsModule } from '../modules/conversations/conversations.module';
 import { MessagesModule } from '../modules/messages/messages.module';
+import { FilesModule } from '../modules/files/files.module';
 import { ChatGateway } from './gateways/chat.gateway';
+import { FileUploadGateway } from './gateways/file-upload.gateway';
 import { SocketController } from './controllers/socket.controller';
 import {
     SocketAuthService,
@@ -14,6 +16,7 @@ import {
     MessageOptimizationService,
     DeviceSyncService,
     SocketCleanupService,
+    FileChatIntegrationService,
 } from './services';
 
 @Module({
@@ -25,18 +28,22 @@ import {
         UsersModule,
         ConversationsModule,
         MessagesModule,
+        FilesModule,
     ],
     controllers: [SocketController],
     providers: [
         ChatGateway,
+        FileUploadGateway,
         SocketAuthService,
         MessageQueueService,
         MessageOptimizationService,
         DeviceSyncService,
         SocketCleanupService,
+        FileChatIntegrationService,
     ],
     exports: [
         ChatGateway,
+        FileUploadGateway,
         MessageQueueService,
     ],
 })

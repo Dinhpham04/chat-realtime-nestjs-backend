@@ -8,13 +8,15 @@ import {
     ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Injectable, Logger, UseGuards } from '@nestjs/common';
+import { Inject, Injectable, Logger, UseGuards, forwardRef } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { SocketAuthService } from '../services/socket-auth.service';
 import { MessageQueueService } from '../services/message-queue.service';
 import { MessageOptimizationService } from '../services/message-optimization.service';
 import { DeviceSyncService } from '../services/device-sync.service';
+import { FileChatIntegrationService } from '../services/file-chat-integration.service';
 import { MessagesService } from '../../modules/messages/services/messages.service';
+import { FilesService } from '../../modules/files/services/files.service';
 import { UserContext } from '../../modules/messages/interfaces/message-service.interface';
 import { CreateMessageDto, MessageResponseDto } from '../../modules/messages/dto';
 
@@ -25,6 +27,11 @@ interface SendMessageDto {
     content: string;
     type: 'text' | 'image' | 'file' | 'audio' | 'video';
     timestamp: number;
+    // File message specific fields
+    fileId?: string;
+    fileName?: string;
+    fileSize?: number;
+    mimeType?: string;
 }
 
 interface DeliveryDto {
@@ -43,6 +50,12 @@ interface ReadReceiptDto {
 
 interface JoinConversationsDto {
     conversationIds: string[];
+}
+
+interface ShareFileDto {
+    fileId: string;
+    conversationId: string;
+    message?: string;
 }
 
 interface AuthDto {
@@ -77,7 +90,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         private readonly messageQueueService: MessageQueueService,
         private readonly optimizationService: MessageOptimizationService,
         private readonly deviceSyncService: DeviceSyncService,
+        @Inject(forwardRef(() => FileChatIntegrationService))
+        private readonly fileChatIntegrationService: FileChatIntegrationService,
         private readonly messagesService: MessagesService,
+        private readonly filesService: FilesService,
         private readonly eventEmitter: EventEmitter2,
     ) { }
 
@@ -208,8 +224,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 content: data.content,
                 type: data.type as any, // Convert to MessageType enum
                 attachments: [], // TODO: Add attachment support
-                mentions: [] // TODO: Add mention support
+                mentions: [], // TODO: Add mention support
             };
+
+            // Handle file messages
+            if (data.type === 'file' && data.fileId) {
+                // Verify file ownership and get file details
+                const fileDetails = await this.filesService.getFile(data.fileId, userId);
+                if (!fileDetails) {
+                    throw new Error('File not found or access denied');
+                }
+
+                // Add file attachment to message
+                createMessageDto.attachments = [{
+                    fileId: data.fileId,
+                    fileName: data.fileName || fileDetails.fileName,
+                    fileSize: data.fileSize || fileDetails.fileSize,
+                    mimeType: data.mimeType || fileDetails.mimeType,
+                }];
+
+                // Update content with file info if empty
+                if (!data.content || data.content.trim() === '') {
+                    createMessageDto.content = `📎 ${createMessageDto.attachments[0].fileName}`;
+                }
+            }
 
             // Send immediate acknowledgment to sender
             client.emit('message_received', {
@@ -233,7 +271,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             });
 
             // Broadcast to conversation participants
-            this.server.to(`conversation:${data.conversationId}`).emit('new_message', {
+            const messageData: any = {
                 id: message.id,
                 conversationId: message.conversationId,
                 senderId: message.senderId,
@@ -241,8 +279,40 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 content: message.content,
                 messageType: message.type,
                 timestamp: message.createdAt,
-                localId: data.localId // Echo back for sender
-            });
+                localId: data.localId, // Echo back for sender
+            };
+
+            // Add file info for file messages
+            if (data.type === 'file' && message.attachments && message.attachments.length > 0) {
+                const attachment = message.attachments[0];
+                messageData.fileInfo = {
+                    id: attachment.fileId,
+                    fileName: attachment.fileName,
+                    fileSize: attachment.fileSize,
+                    mimeType: attachment.mimeType,
+                    downloadUrl: await this.filesService.generateDownloadUrl(
+                        attachment.fileId,
+                        userId,
+                        { expiresIn: 24 * 60 * 60 } // 24 hours
+                    ),
+                };
+
+                // Notify file chat integration service about the file message
+                await this.fileChatIntegrationService.notifyFileMessage({
+                    messageId: message.id,
+                    conversationId: message.conversationId,
+                    senderId: message.senderId,
+                    senderName: 'User', // TODO: Get from user service
+                    fileId: attachment.fileId,
+                    fileName: attachment.fileName,
+                    fileSize: attachment.fileSize,
+                    mimeType: attachment.mimeType,
+                    downloadUrl: messageData.fileInfo.downloadUrl,
+                    timestamp: message.createdAt.getTime(),
+                });
+            }
+
+            this.server.to(`conversation:${data.conversationId}`).emit('new_message', messageData);
 
             this.logger.log(`Message sent: ${message.id} by ${userId} to conversation ${data.conversationId}`);
 
@@ -312,6 +382,115 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         } catch (error) {
             this.logger.error(`Read receipt error:`, error);
+        }
+    }
+
+    @SubscribeMessage('share_file')
+    async handleShareFile(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: ShareFileDto,
+    ) {
+        const startTime = Date.now();
+
+        try {
+            const userId = this.socketToUser.get(client.id);
+            const deviceInfo = this.socketToDevice.get(client.id);
+
+            if (!userId || !deviceInfo) {
+                throw new Error('User not authenticated');
+            }
+
+            // Verify file access
+            const fileDetails = await this.filesService.getFile(data.fileId, userId);
+            if (!fileDetails) {
+                throw new Error('File not found or access denied');
+            }
+
+            // Create user context for service
+            const userContext: UserContext = {
+                userId: userId,
+                deviceId: deviceInfo.deviceId,
+                roles: ['user']
+            };
+
+            // Create file message
+            const createMessageDto: CreateMessageDto = {
+                localId: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                conversationId: data.conversationId,
+                content: data.message || `📎 ${fileDetails.fileName}`,
+                type: 'file' as any,
+                attachments: [{
+                    fileId: data.fileId,
+                    fileName: fileDetails.fileName,
+                    fileSize: fileDetails.fileSize,
+                    mimeType: fileDetails.mimeType,
+                }],
+                mentions: []
+            };
+
+            // Send message via Messages Service
+            const message = await this.messagesService.sendMessage(createMessageDto, userContext);
+
+            // Generate download URL for sharing
+            const downloadUrl = await this.filesService.generateDownloadUrl(
+                data.fileId,
+                userId,
+                { expiresIn: 24 * 60 * 60 } // 24 hours
+            );
+
+            // Broadcast file message to conversation
+            const messageData = {
+                id: message.id,
+                conversationId: message.conversationId,
+                senderId: message.senderId,
+                senderName: 'User', // TODO: Get from user service
+                content: message.content,
+                messageType: message.type,
+                timestamp: message.createdAt,
+                fileInfo: {
+                    id: data.fileId,
+                    fileName: fileDetails.fileName,
+                    fileSize: fileDetails.fileSize,
+                    mimeType: fileDetails.mimeType,
+                    downloadUrl: downloadUrl,
+                }
+            };
+
+            this.server.to(`conversation:${data.conversationId}`).emit('new_file_message', messageData);
+
+            // Send success response to sender
+            client.emit('file_shared', {
+                messageId: message.id,
+                fileId: data.fileId,
+                conversationId: data.conversationId,
+                processingTime: Date.now() - startTime,
+            });
+
+            // Notify file chat integration service
+            await this.fileChatIntegrationService.notifyFileMessage({
+                messageId: message.id,
+                conversationId: message.conversationId,
+                senderId: message.senderId,
+                senderName: 'User',
+                fileId: data.fileId,
+                fileName: fileDetails.fileName,
+                fileSize: fileDetails.fileSize,
+                mimeType: fileDetails.mimeType,
+                downloadUrl: downloadUrl,
+                timestamp: message.createdAt.getTime(),
+            });
+
+            this.logger.log(`File shared: ${data.fileId} by ${userId} to conversation ${data.conversationId}`);
+
+        } catch (error) {
+            this.logger.error(`Share file error for socket ${client.id}:`, error);
+
+            client.emit('share_file_error', {
+                fileId: data.fileId,
+                conversationId: data.conversationId,
+                error: error.message,
+                processingTime: Date.now() - startTime,
+            });
         }
     }
 
