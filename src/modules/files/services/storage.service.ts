@@ -23,7 +23,10 @@ export class StorageService implements IStorageService {
     ) {
         this.localStoragePath = this.configService.get<string>('LOCAL_STORAGE_PATH', './uploads');
         this.baseUrl = this.configService.get<string>('BASE_URL', 'http://localhost:3000');
-        this.initializeLocalStorage();
+        // Initialize storage asynchronously but don't block constructor
+        this.initializeLocalStorage().catch(error => {
+            this.logger.error('Failed to initialize local storage:', error);
+        });
     }
 
     /**
@@ -80,7 +83,19 @@ export class StorageService implements IStorageService {
      */
     async deleteFile(filePath: string): Promise<void> {
         try {
-            const fullPath = path.join(this.localStoragePath, filePath);
+            // Validate path to prevent path traversal attacks
+            const normalizedPath = path.normalize(filePath);
+            if (normalizedPath.includes('..') || path.isAbsolute(normalizedPath)) {
+                throw new BadRequestException('Invalid file path');
+            }
+
+            const fullPath = path.join(this.localStoragePath, normalizedPath);
+
+            // Ensure the resolved path is still within storage directory
+            if (!fullPath.startsWith(path.resolve(this.localStoragePath))) {
+                throw new BadRequestException('Path traversal not allowed');
+            }
+
             await fs.unlink(fullPath);
             this.logger.log(`Deleted file: ${filePath}`);
         } catch (error) {
@@ -223,7 +238,11 @@ export class StorageService implements IStorageService {
             const dirPath = path.join(this.localStoragePath, subDir);
             try {
                 const files = await fs.readdir(dirPath);
-                const matchingFile = files.find(file => file.startsWith(fileId));
+                // Fix: Use exact match with extensions to avoid partial matches
+                const matchingFile = files.find(file => {
+                    const nameWithoutExt = path.parse(file).name;
+                    return nameWithoutExt === fileId;
+                });
 
                 if (matchingFile) {
                     return path.join(dirPath, matchingFile);
@@ -299,19 +318,24 @@ export class StorageService implements IStorageService {
      * @returns Chunk storage result
      */
     async uploadChunk(chunkPath: string, chunkData: Buffer): Promise<{ path: string }> {
-        const fullPath = path.join(this.localStoragePath, 'chunks', chunkPath);
+        try {
+            const fullPath = path.join(this.localStoragePath, 'chunks', chunkPath);
 
-        // Create directory if needed
-        await fs.mkdir(path.dirname(fullPath), { recursive: true });
+            // Create directory if needed
+            await fs.mkdir(path.dirname(fullPath), { recursive: true });
 
-        // Write chunk file
-        await fs.writeFile(fullPath, chunkData);
+            // Write chunk file
+            await fs.writeFile(fullPath, chunkData);
 
-        this.logger.log(`Chunk uploaded: ${chunkPath} (${chunkData.length} bytes)`);
+            this.logger.log(`Chunk uploaded: ${chunkPath} (${chunkData.length} bytes) to ${fullPath}`);
 
-        return {
-            path: fullPath,
-        };
+            return {
+                path: fullPath,
+            };
+        } catch (error) {
+            this.logger.error(`Failed to upload chunk ${chunkPath}: ${error.message}`);
+            throw new InternalServerErrorException(`Chunk upload failed: ${error.message}`);
+        }
     }
 
     /**
@@ -323,12 +347,15 @@ export class StorageService implements IStorageService {
         const fullPath = path.join(this.localStoragePath, 'chunks', chunkPath);
 
         try {
-            return await fs.readFile(fullPath);
+            const buffer = await fs.readFile(fullPath);
+            this.logger.log(`Chunk downloaded: ${chunkPath} (${buffer.length} bytes) from ${fullPath}`);
+            return buffer;
         } catch (error: any) {
+            this.logger.error(`Failed to download chunk ${chunkPath}: ${error.message}`);
             if (error.code === 'ENOENT') {
                 throw new NotFoundException(`Chunk not found: ${chunkPath}`);
             }
-            throw error;
+            throw new InternalServerErrorException(`Chunk download failed: ${error.message}`);
         }
     }
 
