@@ -123,6 +123,61 @@ export class MessagesController {
     }
 
     /**
+     * Get recent messages for conversation (optimized for chat history)
+     * Fast endpoint for initial chat load
+     */
+    @Get('conversation/:conversationId/recent')
+    async getRecentMessages(
+        @Param('conversationId') conversationId: string,
+        @CurrentUser() user: JwtUser,
+        @Request() req: any,
+        @Query('limit') limit?: number,
+        @Query('before') before?: string, // Message ID to load messages before
+    ): Promise<{
+        messages: MessageResponseDto[];
+        hasMore: boolean;
+        oldestMessageId?: string;
+        total: number;
+    }> {
+        const userContext = this.buildUserContext(user, req);
+        const maxLimit = Math.min(limit || 50, 100); // Max 100 messages
+
+        return await this.messagesService.getRecentMessages(
+            conversationId,
+            maxLimit,
+            before,
+            userContext
+        );
+    }
+
+    /**
+     * Get messages around a specific message (for jump to message feature)
+     */
+    @Get('conversation/:conversationId/around/:messageId')
+    async getMessagesAround(
+        @Param('conversationId') conversationId: string,
+        @Param('messageId') messageId: string,
+        @CurrentUser() user: JwtUser,
+        @Request() req: any,
+        @Query('limit') limit?: number,
+    ): Promise<{
+        messages: MessageResponseDto[];
+        targetMessage: MessageResponseDto;
+        hasMoreBefore: boolean;
+        hasMoreAfter: boolean;
+    }> {
+        const userContext = this.buildUserContext(user, req);
+        const contextLimit = Math.min(limit || 25, 50); // 25 messages before + 25 after
+
+        return await this.messagesService.getMessagesAround(
+            conversationId,
+            messageId,
+            contextLimit,
+            userContext
+        );
+    }
+
+    /**
      * Search messages in conversation
      */
     @Get('conversation/:conversationId/search')

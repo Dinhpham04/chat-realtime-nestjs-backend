@@ -40,6 +40,11 @@ export interface IMessageRepository {
    */
   softDelete(id: string): Promise<boolean>;
 
+  /**
+   * Update message status
+   */
+  updateMessageStatus(id: string, status: { status: any; updatedAt: Date }): Promise<MessageDocument | null>;
+
   // =============== CONVERSATION OPERATIONS ===============
 
   /**
@@ -102,6 +107,31 @@ export interface IMessageRepository {
    * Bulk delete messages
    */
   bulkDelete(messageIds: string[]): Promise<number>;
+
+  // =============== CHAT HISTORY OPERATIONS ===============
+
+  /**
+   * Get messages before a specific message (for context loading)
+   */
+  getMessagesBeforeMessage(
+    conversationId: string,
+    messageId: string,
+    limit: number
+  ): Promise<MessageDocument[]>;
+
+  /**
+   * Get messages after a specific message (for context loading)
+   */
+  getMessagesAfterMessage(
+    conversationId: string,
+    messageId: string,
+    limit: number
+  ): Promise<MessageDocument[]>;
+
+  /**
+   * Count total messages in conversation
+   */
+  countByConversationId(conversationId: string): Promise<number>;
 
   // =============== USER OPERATIONS ===============
 

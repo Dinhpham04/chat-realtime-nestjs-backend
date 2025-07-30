@@ -104,7 +104,6 @@ export class MessageQueueService {
 
             // Get all queued messages
             const messageIds = await this.redis.lrange(queueKey, 0, -1);
-
             if (messageIds.length === 0) {
                 this.logger.log(`No queued messages for user ${userId}`);
                 return;
@@ -200,6 +199,94 @@ export class MessageQueueService {
         } catch (error) {
             this.logger.error(`Failed to get queue count for user ${userId}:`, error);
             return 0;
+        }
+    }
+
+    /**
+     * Get all queued messages for a user
+     */
+    async getQueuedMessages(userId: string): Promise<QueuedMessage[]> {
+        try {
+            const queueKey = `offline_queue:${userId}`;
+            const messageStrings = await this.redis.lrange(queueKey, 0, -1);
+
+            return messageStrings.map(msgStr => JSON.parse(msgStr));
+
+        } catch (error) {
+            this.logger.error(`Failed to get queued messages for user ${userId}:`, error);
+            return [];
+        }
+    }
+
+    /**
+     * Queue a single message for a specific user
+     */
+    async queueMessage(userId: string, messageData: {
+        messageId: string;
+        conversationId: string;
+        senderId: string;
+        content: string;
+        messageType: string;
+        timestamp: number;
+        senderName: string;
+        status: string;
+        queuedAt: number;
+    }): Promise<void> {
+        try {
+            const message: QueuedMessage = {
+                id: messageData.messageId, // Map messageId to id
+                conversationId: messageData.conversationId,
+                senderId: messageData.senderId,
+                senderName: messageData.senderName,
+                content: messageData.content,
+                timestamp: messageData.timestamp,
+                type: messageData.messageType as QueuedMessage['type']
+            };
+
+            this.logger.debug(`Queueing message ${message.id} for user ${userId}`, message);
+
+            await this.queueForOfflineUser(userId, message);
+
+        } catch (error) {
+            this.logger.error(`Failed to queue message for user ${userId}:`, error);
+        }
+    }
+
+    /**
+     * Remove a specific queued message for a user
+     */
+    async removeQueuedMessage(userId: string, messageId: string): Promise<void> {
+        try {
+            const queueKey = `offline_queue:${userId}`;
+            const messageStrings = await this.redis.lrange(queueKey, 0, -1);
+
+            for (let i = 0; i < messageStrings.length; i++) {
+                const message = JSON.parse(messageStrings[i]);
+                if (message.id === messageId) {
+                    // Remove specific message from list
+                    await this.redis.lrem(queueKey, 1, messageStrings[i]);
+                    this.logger.log(`Removed queued message ${messageId} for user ${userId}`);
+                    break;
+                }
+            }
+
+        } catch (error) {
+            this.logger.error(`Failed to remove queued message ${messageId} for user ${userId}:`, error);
+        }
+    }
+
+    /**
+     * Clear all delivered messages for a user
+     */
+    async clearDeliveredMessages(userId: string): Promise<void> {
+        try {
+            const queueKey = `offline_queue:${userId}`;
+            await this.redis.del(queueKey);
+
+            this.logger.log(`Cleared all delivered messages for user ${userId}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to clear delivered messages for user ${userId}:`, error);
         }
     }
 

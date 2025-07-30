@@ -18,6 +18,18 @@ import { MessagesService } from '../../modules/messages/services/messages.servic
 import { FilesService } from '../../modules/files/services/files.service';
 import { ConversationsService } from '../../modules/conversations/services/conversations.service';
 import { UsersService } from '../../modules/users/services/users.service';
+import { PresenceService } from '../../shared/services/presence.service';
+import { LastMessageService } from '../../shared/services/last-message.service';
+import {
+    UpdatePresenceDto,
+    HeartbeatDto,
+    BulkPresenceRequestDto,
+    DeviceInfo
+} from '../../shared/types/presence.types';
+import {
+    GetConversationsLastMessagesDto,
+    ConversationLastMessageUpdate
+} from '../../shared/types/last-message.types';
 import { UserContext } from '../../modules/messages/interfaces/message-service.interface';
 import { CreateMessageDto, MessageResponseDto } from '../../modules/messages/dto';
 
@@ -181,6 +193,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         private readonly filesService: FilesService,
         private readonly conversationsService: ConversationsService,
         private readonly usersService: UsersService,
+        private readonly presenceService: PresenceService,
+        private readonly lastMessageService: LastMessageService,
         private readonly eventEmitter: EventEmitter2,
     ) { }
 
@@ -254,8 +268,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // Deliver offline messages
             await this.messageQueueService.deliverQueuedMessages(user.userId, client);
 
+            // Send delivery confirmations for queued messages that are now delivered
+            await this.sendDeliveryConfirmationsForQueuedMessages(user.userId, client);
+
             // Sync device state
             await this.deviceSyncService.syncDeviceOnConnect(user.userId, authData.deviceId, client);
+
+            // Set user online status in presence service
+            const deviceInfo: DeviceInfo = {
+                deviceId: authData.deviceId,
+                deviceType: authData.deviceType,
+                platform: authData.platform,
+                socketId: client.id,
+            };
+            await this.presenceService.setUserOnline(user.userId, deviceInfo);
+
+            // Join user to presence room for receiving presence updates
+            await client.join(`presence:${user.userId}`);
+
+            // Notify user's contacts about online status
+            await this.notifyContactsAboutPresenceChange(user.userId, 'online');
 
             this.logger.log(`User ${user.userId} connected from ${authData.deviceType} (${client.id})`);
 
@@ -290,6 +322,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                     deviceInfo.deviceId,
                     userId
                 );
+
+                // Update presence status - set offline if no other devices
+                await this.presenceService.setUserOffline(userId, deviceInfo.deviceId);
+
+                // Notify contacts about potential offline status
+                await this.notifyContactsAboutPresenceChange(userId, 'offline');
             }
         }
 
@@ -454,12 +492,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             this.logger.debug(`data will be send: `, createMessageDto);
 
-            // Send immediate acknowledgment to sender
+            // Send immediate acknowledgment to sender (SENT status)
             client.emit('message_received', {
                 localId: data.localId,
                 serverId: 'pending',
                 timestamp: Date.now(),
-                status: 'received',
+                status: 'sent', // Changed from 'received' to 'sent'
                 processingTime: Date.now() - startTime,
             });
 
@@ -470,14 +508,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             this.logger.log(`Message created successfully`, message);
 
-            // Update acknowledgment with real server ID and message content
+            // Update acknowledgment with real server ID and processed status
             client.emit('message_received', {
                 localId: data.localId,
                 serverId: message.id,
                 content: message.content,
                 messageType: message.type,
                 timestamp: message.createdAt,
-                status: 'processed',
+                status: 'processed', // Server successfully processed message
                 processingTime: Date.now() - startTime,
                 // Include file info if present for sender's UI
                 filesInfo: filesMetadata.length > 0 ? filesMetadata.map(file => ({
@@ -557,6 +595,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             this.logger.log(`Message broadcasted: ${message.id} by ${userId} to conversation:${data.conversationId} (sender excluded)`);
             this.logger.log(`Broadcast data:`, JSON.stringify(messageData, null, 2));
 
+            // Auto-mark as delivered for online participants (excluding sender)
+            try {
+                const participants = (await this.getConversationParticipants(data.conversationId, userId)).filter(i => i !== userId);
+                this.logger.debug(`Participants for delivery update:`, participants);
+                await this.updateDeliveryStatusForOnlineUsers(message.id, participants);
+
+                // Queue message for offline participants
+                await this.queueMessageForOfflineParticipants(message, participants, userId);
+
+                // Update lastMessage for conversation list real-time updates
+                await this.updateAndBroadcastLastMessage(message, data.conversationId, userId);
+
+            } catch (deliveryError) {
+                this.logger.warn(`Failed to update delivery status for message ${message.id}:`, deliveryError);
+            }
+
         } catch (error) {
             this.logger.error(`Send message error for socket ${client.id}:`, error);
 
@@ -577,18 +631,46 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     ) {
         try {
             const userId = this.socketToUser.get(client.id);
-            if (!userId) return;
+            if (!userId) {
+                this.logger.warn('Message delivery update: User not authenticated');
+                return;
+            }
 
-            // Add to delivery batch (optimization)
-            await this.optimizationService.addDeliveryUpdate(data.conversationId, {
+            this.logger.log(`Message ${data.messageId} marked as delivered by user ${userId}`);
+
+            // Update delivery status in database (if service supports it)
+            try {
+                await this.messagesService.markAsDelivered(data.messageId, userId, data.deliveredAt);
+                this.logger.debug(`Delivery status update skipped - service method not implemented`);
+            } catch (dbError) {
+                this.logger.warn(`Failed to update delivery status in database:`, dbError);
+            }
+
+            // Notify conversation participants about delivery (excluding the user who delivered)
+            const deliveryUpdate = {
                 messageId: data.messageId,
                 userId: userId,
                 status: 'delivered',
-                timestamp: data.deliveredAt,
-            });
+                timestamp: data.deliveredAt
+            };
+
+            // Broadcast delivery update to conversation participants
+            client.to(`conversation:${data.conversationId}`).emit('message_delivery_update', deliveryUpdate);
+
+            // Add to delivery batch for optimization (if service supports it)
+            try {
+                await this.optimizationService?.addDeliveryUpdate?.(data.conversationId, {
+                    messageId: data.messageId,
+                    userId: userId,
+                    status: 'delivered',
+                    timestamp: data.deliveredAt,
+                });
+            } catch (optimizationError) {
+                this.logger.warn(`Optimization service delivery update failed:`, optimizationError);
+            }
 
         } catch (error) {
-            this.logger.error(`Delivery update error:`, error);
+            this.logger.error(`Delivery update error for message ${data.messageId}:`, error);
         }
     }
 
@@ -601,28 +683,62 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             const userId = this.socketToUser.get(client.id);
             const deviceInfo = this.socketToDevice.get(client.id);
 
-            if (!userId || !deviceInfo) return;
+            if (!userId || !deviceInfo) {
+                this.logger.warn('Mark as read: User not authenticated');
+                return;
+            }
+
+            this.logger.log(`${data.messageIds.length} messages marked as read by user ${userId}`);
 
             // Update read status in database
-            await this.updateMessagesReadStatus(data.messageIds, userId, data.readAt);
+            try {
+                await this.updateMessagesReadStatus(data.messageIds, userId, data.readAt);
+            } catch (dbError) {
+                this.logger.warn(`Failed to update read status in database:`, dbError);
+            }
 
-            // Sync to other devices of same user
-            await this.deviceSyncService.syncReadStatusToOtherDevices(
-                userId,
-                deviceInfo.deviceId,
-                data.messageIds,
-                data.readAt,
-            );
+            // Broadcast read receipt to conversation participants (excluding reader)
+            const readReceiptUpdate = {
+                messageIds: data.messageIds,
+                userId: userId,
+                readAt: data.readAt,
+                conversationId: data.conversationId
+            };
 
-            // Add to read receipt batch
-            await this.optimizationService.addReadReceipt(
+            client.to(`conversation:${data.conversationId}`).emit('messages_read_update', readReceiptUpdate);
+
+            // Update lastMessage read status for conversation list
+            await this.updateLastMessageReadStatus(
                 data.conversationId,
                 data.messageIds,
-                userId,
+                userId
             );
 
+            // Sync to other devices of same user
+            try {
+                await this.deviceSyncService?.syncReadStatusToOtherDevices?.(
+                    userId,
+                    deviceInfo.deviceId,
+                    data.messageIds,
+                    data.readAt,
+                );
+            } catch (syncError) {
+                this.logger.warn(`Failed to sync read status to other devices:`, syncError);
+            }
+
+            // Add to read receipt batch for optimization
+            try {
+                await this.optimizationService?.addReadReceipt?.(
+                    data.conversationId,
+                    data.messageIds,
+                    userId,
+                );
+            } catch (optimizationError) {
+                this.logger.warn(`Optimization service read receipt failed:`, optimizationError);
+            }
+
         } catch (error) {
-            this.logger.error(`Read receipt error:`, error);
+            this.logger.error(`Read receipt error for user ${this.socketToUser.get(client.id)}:`, error);
         }
     }
 
@@ -848,6 +964,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             for (const convId of data.conversationIds) {
                 // Verify permission
                 const hasPermission = await this.checkConversationPermission(userId, convId);
+                this.logger.debug(`User ${userId} permission for conversation ${convId}: ${hasPermission}`);
                 if (hasPermission) {
                     await client.join(`conversation:${convId}`);
                     this.logger.log(`User ${userId} successfully joined conversation:${convId}`);
@@ -1011,6 +1128,395 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             });
         }
     }
+
+    // ================= BATCH STATUS UPDATE METHODS =================
+
+    /**
+     * Handle batch delivery updates
+     * Client can send multiple delivery confirmations at once
+     */
+    @SubscribeMessage('batch_mark_delivered')
+    async handleBatchMarkDelivered(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { messageIds: string[]; conversationId: string; deliveredAt: number },
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Batch delivery update: User not authenticated');
+                return;
+            }
+
+            this.logger.log(`Batch delivery: ${data.messageIds.length} messages marked as delivered by user ${userId}`);
+
+            // Process each message delivery
+            const deliveryUpdates: Array<{
+                messageId: string;
+                userId: string;
+                status: 'delivered';
+                timestamp: number;
+            }> = [];
+
+            for (const messageId of data.messageIds) {
+                try {
+                    // TODO: Update in database when service method is available
+                    // await this.messagesService.markAsDelivered(messageId, userId, data.deliveredAt);
+
+                    deliveryUpdates.push({
+                        messageId,
+                        userId,
+                        status: 'delivered' as const,
+                        timestamp: data.deliveredAt
+                    });
+                } catch (error) {
+                    this.logger.warn(`Failed to update delivery for message ${messageId}:`, error);
+                }
+            }
+
+            // Broadcast batch delivery update to conversation participants
+            if (deliveryUpdates.length > 0) {
+                client.to(`conversation:${data.conversationId}`).emit('batch_delivery_updates', {
+                    updates: deliveryUpdates,
+                    timestamp: data.deliveredAt
+                });
+
+                // Add to optimization service if available
+                try {
+                    for (const update of deliveryUpdates) {
+                        await this.optimizationService?.addDeliveryUpdate?.(data.conversationId, update);
+                    }
+                } catch (optimizationError) {
+                    this.logger.warn(`Batch optimization delivery update failed:`, optimizationError);
+                }
+            }
+
+        } catch (error) {
+            this.logger.error(`Batch delivery update error:`, error);
+        }
+    }
+
+    /**
+     * Handle batch read receipt updates
+     * Client can mark multiple messages as read at once
+     */
+    @SubscribeMessage('batch_mark_read')
+    async handleBatchMarkRead(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { messageIds: string[]; conversationId: string; readAt: number },
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Batch read update: User not authenticated');
+                return;
+            }
+
+            this.logger.log(`Batch read: ${data.messageIds.length} messages marked as read by user ${userId}`);
+
+            // Update read status in database
+            try {
+                await this.updateMessagesReadStatus(data.messageIds, userId, data.readAt);
+            } catch (dbError) {
+                this.logger.warn(`Failed to update batch read status in database:`, dbError);
+            }
+
+            // Broadcast batch read receipt to conversation participants
+            const readReceiptUpdate = {
+                messageIds: data.messageIds,
+                userId: userId,
+                readAt: data.readAt,
+                conversationId: data.conversationId
+            };
+
+            client.to(`conversation:${data.conversationId}`).emit('batch_read_receipts', readReceiptUpdate);
+
+            // Update lastMessage read status for conversation list
+            await this.updateLastMessageReadStatus(
+                data.conversationId,
+                data.messageIds,
+                userId
+            );
+
+            // Add to optimization service if available
+            try {
+                await this.optimizationService?.addReadReceipt?.(
+                    data.conversationId,
+                    data.messageIds,
+                    userId,
+                );
+            } catch (optimizationError) {
+                this.logger.warn(`Batch optimization read receipt failed:`, optimizationError);
+            }
+
+        } catch (error) {
+            this.logger.error(`Batch read receipt error:`, error);
+        }
+    }
+
+    /**
+     * Request status sync for messages (useful after reconnection)
+     */
+    @SubscribeMessage('request_status_sync')
+    async handleRequestStatusSync(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { conversationId: string; messageIds?: string[]; since?: number },
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Status sync request: User not authenticated');
+                return;
+            }
+
+            this.logger.log(`Status sync requested by user ${userId} for conversation ${data.conversationId}`);
+
+            // TODO: Implement when MessagesService supports status querying
+            // const statusUpdates = await this.messagesService.getMessageStatuses(
+            //     data.conversationId,
+            //     data.messageIds,
+            //     data.since
+            // );
+
+            // For now, just acknowledge the request
+            client.emit('status_sync_response', {
+                conversationId: data.conversationId,
+                message: 'Status sync not yet implemented - service method pending',
+                timestamp: Date.now()
+            });
+
+        } catch (error) {
+            this.logger.error(`Status sync request error:`, error);
+        }
+    }
+
+    /**
+     * Send delivery confirmations for messages that were queued and now delivered
+     * @param userId - User who just connected
+     * @param client - Socket client instance
+     */
+    private async sendDeliveryConfirmationsForQueuedMessages(userId: string, client: Socket): Promise<void> {
+        try {
+            // Get all queued messages for this user that were just delivered
+            const queuedMessages = await this.messageQueueService.getQueuedMessages?.(userId) || [];
+
+            for (const queuedMessage of queuedMessages) {
+                // Send delivery confirmation to the original sender and conversation
+                const deliveryConfirmation = {
+                    messageId: queuedMessage.id, // Use 'id' field from QueuedMessage
+                    userId: userId,
+                    status: 'delivered_after_reconnect',
+                    timestamp: Date.now()
+                };
+
+                // Notify conversation about successful delivery
+                this.server.to(`conversation:${queuedMessage.conversationId}`).emit('message_delivery_confirmed', deliveryConfirmation);
+
+                // Update delivery status in database if service supports it
+                try {
+                    await this.messagesService.markAsDelivered?.(queuedMessage.id, userId, Date.now());
+                } catch (dbError) {
+                    this.logger.warn(`Failed to update delivery status in database for message ${queuedMessage.id}:`, dbError);
+                }
+
+                this.logger.log(`Delivery confirmation sent for queued message ${queuedMessage.id} to user ${userId}`);
+            }            // Clear delivered queued messages
+            await this.messageQueueService.clearDeliveredMessages?.(userId);
+
+        } catch (error) {
+            this.logger.error(`Failed to send delivery confirmations for queued messages:`, error);
+        }
+    }
+
+    /**
+     * Queue message for offline participants
+     * @param message - The message to queue
+     * @param participants - All conversation participants
+     * @param senderId - The sender user ID
+     */
+    private async queueMessageForOfflineParticipants(
+        message: any,
+        participants: string[],
+        senderId: string
+    ): Promise<void> {
+        try {
+            for (const participantId of participants) {
+                // Skip sender
+                if (participantId === senderId) continue;
+
+                // Check if participant is online
+                const isOnline = this.isUserOnline(participantId);
+
+                if (!isOnline) {
+                    // Queue message for offline participant
+                    await this.messageQueueService.queueMessage(participantId, {
+                        messageId: message.id,
+                        conversationId: message.conversationId,
+                        senderId: message.senderId,
+                        content: message.content,
+                        messageType: message.type,
+                        timestamp: message.createdAt,
+                        senderName: await this.getUserDisplayName(senderId),
+                        status: 'queued',
+                        queuedAt: Date.now()
+                    });
+
+                    this.logger.log(`Message ${message.id} queued for offline user ${participantId}`);
+                }
+            }
+        } catch (error) {
+            this.logger.error(`Failed to queue message for offline participants:`, error);
+        }
+    }
+
+    /**
+     * Handle delivery confirmation from client
+     * This confirms that a specific message was successfully received by a participant
+     */
+    @SubscribeMessage('confirm_message_delivery')
+    async handleConfirmMessageDelivery(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { messageId: string; conversationId: string; deliveredAt: number },
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Delivery confirmation: User not authenticated');
+                return;
+            }
+
+            this.logger.log(`Message ${data.messageId} delivery confirmed by user ${userId}`);
+
+            // Update delivery status in database
+            try {
+                await this.messagesService.markAsDelivered?.(data.messageId, userId, data.deliveredAt);
+            } catch (dbError) {
+                this.logger.warn(`Failed to update delivery confirmation in database:`, dbError);
+            }
+
+            // Notify sender about successful delivery
+            const deliveryConfirmation = {
+                messageId: data.messageId,
+                userId: userId,
+                status: 'delivered_confirmed',
+                timestamp: data.deliveredAt
+            };
+
+            // Send confirmation to conversation (mainly for sender to update UI)
+            client.to(`conversation:${data.conversationId}`).emit('message_delivery_confirmed', deliveryConfirmation);
+
+            // Remove from queue if it was queued
+            await this.messageQueueService.removeQueuedMessage?.(userId, data.messageId);
+
+        } catch (error) {
+            this.logger.error(`Delivery confirmation error for message ${data.messageId}:`, error);
+        }
+    }
+
+    /**
+     * Request message retry for failed deliveries
+     * Client can request to resend messages that failed to deliver
+     */
+    @SubscribeMessage('retry_message_delivery')
+    async handleRetryMessageDelivery(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { messageId: string; conversationId: string },
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Message retry: User not authenticated');
+                return;
+            }
+
+            // Get message from database
+            const message = await this.messagesService.getMessageById?.(data.messageId);
+            if (!message) {
+                client.emit('retry_message_error', {
+                    messageId: data.messageId,
+                    error: 'Message not found'
+                });
+                return;
+            }
+
+            // Check if user has permission to retry this message
+            if (message.senderId !== userId) {
+                client.emit('retry_message_error', {
+                    messageId: data.messageId,
+                    error: 'Permission denied'
+                });
+                return;
+            }
+
+            // Re-broadcast message to conversation
+            const senderName = await this.getUserDisplayName(userId);
+            const messageData = {
+                id: message.id,
+                conversationId: message.conversationId,
+                senderId: message.senderId,
+                senderName: senderName,
+                content: message.content,
+                messageType: message.type,
+                timestamp: message.createdAt,
+                isRetry: true // Flag to indicate this is a retry
+            };
+
+            // Broadcast to conversation participants
+            this.server.to(`conversation:${data.conversationId}`).emit('new_message', messageData);
+
+            // Send retry confirmation to sender
+            client.emit('message_retry_sent', {
+                messageId: data.messageId,
+                timestamp: Date.now()
+            });
+
+            this.logger.log(`Message ${data.messageId} retried by user ${userId}`);
+
+        } catch (error) {
+            this.logger.error(`Message retry error for message ${data.messageId}:`, error);
+
+            client.emit('retry_message_error', {
+                messageId: data.messageId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get delivery status for messages
+     * Useful for sender to check which participants have received messages
+     */
+    @SubscribeMessage('get_message_delivery_status')
+    async handleGetMessageDeliveryStatus(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { messageIds: string[]; conversationId: string },
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Get delivery status: User not authenticated');
+                return;
+            }
+
+            // Get delivery status from database
+            const deliveryStatuses = await this.messagesService.getMessagesDeliveryStatus?.(data.messageIds, userId);
+
+            client.emit('message_delivery_status', {
+                conversationId: data.conversationId,
+                deliveryStatuses: deliveryStatuses || []
+            });
+
+        } catch (error) {
+            this.logger.error(`Get delivery status error:`, error);
+
+            client.emit('delivery_status_error', {
+                messageIds: data.messageIds,
+                error: error.message
+            });
+        }
+    }
+
+    // ================= HELPER METHODS SECTION =================
+
     async handleLeaveConversations(
         @ConnectedSocket() client: Socket,
         @MessageBody() data: JoinConversationsDto,
@@ -1053,14 +1559,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     async checkConversationPermission(userId: string, conversationId: string): Promise<boolean> {
         try {
-            // Allow test conversations for development/testing
-            if (conversationId.startsWith('test_')) {
-                this.logger.log(`Allowing test conversation access: ${conversationId} for user ${userId}`);
-                return true;
-            }
-
             const conversations = await this.getUserConversations(userId);
-            return conversations.some(conv => conv.id === conversationId);
+            return conversations.some(conv => conv.id.toString() === conversationId);
         } catch (error) {
             this.logger.error(`Failed to check conversation permission for user ${userId} in conversation ${conversationId}:`, error);
 
@@ -1194,27 +1694,50 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             const deliveryUpdates: Array<{
                 messageId: string;
                 userId: string;
-                status: 'delivered' | 'read';
+                status: 'delivered';
                 timestamp: number;
             }> = [];
 
             const currentTimestamp = Date.now();
 
             for (const userId of participants) {
+
+                this.logger.debug(`Checking online status for user ${userId} for message ${this.isUserOnline(userId) ? 'online' : 'offline'}`);
                 if (this.isUserOnline(userId)) {
-                    deliveryUpdates.push({
-                        messageId,
-                        userId,
-                        status: 'delivered' as const,
-                        timestamp: currentTimestamp
-                    });
+                    // Mark as delivered for online users
+                    try {
+                        await this.messagesService.markAsDelivered(messageId, userId, currentTimestamp);
+                        this.logger.debug(`Delivery status update in DB skipped for user ${userId}`);
+
+                        deliveryUpdates.push({
+                            messageId,
+                            userId,
+                            status: 'delivered' as const,
+                            timestamp: currentTimestamp
+                        });
+
+                        // Emit delivery confirmation to sender and other participants
+                        this.sendToUser(userId, 'message_delivery_update', {
+                            messageId,
+                            userId,
+                            status: 'delivered',
+                            timestamp: currentTimestamp
+                        });
+
+                    } catch (dbError) {
+                        this.logger.warn(`Failed to update delivery status in DB for user ${userId}, message ${messageId}:`, dbError);
+                    }
                 }
             }
 
+            // Batch update through optimization service if available
             if (deliveryUpdates.length > 0) {
-                // Batch update delivery status through optimization service
-                for (const update of deliveryUpdates) {
-                    await this.optimizationService.addDeliveryUpdate(messageId, update);
+                try {
+                    for (const update of deliveryUpdates) {
+                        await this.optimizationService?.addDeliveryUpdate?.(messageId, update);
+                    }
+                } catch (optimizationError) {
+                    this.logger.warn(`Optimization service delivery update failed:`, optimizationError);
                 }
 
                 this.logger.debug(`Updated delivery status for ${deliveryUpdates.length} online users for message ${messageId}`);
@@ -1410,7 +1933,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
      * @param userId - User identifier to check
      * @returns boolean indicating online status
      */
-    isUserOnline(userId: string): boolean {
+    isUserOnlineBasic(userId: string): boolean {
         return this.connectedUsers.has(userId);
     }
 
@@ -1569,5 +2092,442 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (mimeType.startsWith('video/')) return 'video';
         if (mimeType.includes('pdf') || mimeType.includes('document') || mimeType.includes('text')) return 'document';
         return 'file';
+    }
+
+    // ================= PRESENCE EVENT HANDLERS =================
+
+    /**
+     * Handle user presence status update
+     * Client can change status to online, away, busy
+     */
+    @SubscribeMessage('update_presence')
+    async handleUpdatePresence(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: UpdatePresenceDto,
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Presence update: User not authenticated');
+                return;
+            }
+
+            // Update status in presence service
+            await this.presenceService.updateUserStatus(
+                userId,
+                data.status,
+                data.statusMessage
+            );
+
+            // Notify contacts about status change
+            await this.notifyContactsAboutPresenceChange(userId, data.status);
+
+            this.logger.log(`User ${userId} updated presence to ${data.status}`);
+
+        } catch (error) {
+            this.logger.error(`Presence update error for user ${this.socketToUser.get(client.id)}:`, error);
+        }
+    }
+
+    /**
+     * Handle heartbeat from client
+     * Keeps connection alive and updates last seen
+     */
+    @SubscribeMessage('heartbeat')
+    async handleHeartbeat(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: HeartbeatDto,
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                return;
+            }
+
+            // Update heartbeat in presence service
+            await this.presenceService.updateHeartbeat(userId, data.deviceId);
+
+            // Send heartbeat response
+            client.emit('heartbeat_ack', {
+                timestamp: Date.now(),
+                status: 'alive'
+            });
+
+        } catch (error) {
+            this.logger.error(`Heartbeat error for user ${this.socketToUser.get(client.id)}:`, error);
+        }
+    }
+
+    /**
+     * Get presence status for multiple users
+     * Used for contact lists, conversation participants
+     */
+    @SubscribeMessage('get_bulk_presence')
+    async handleGetBulkPresence(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: BulkPresenceRequestDto,
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Bulk presence request: User not authenticated');
+                return;
+            }
+
+            // Get presence for requested users
+            const { presences, onlineCount } = await this.presenceService.getBulkPresence(data.userIds);
+
+            // Convert to DTO format
+            const presenceList = Array.from(presences.entries()).map(([userId, presence]) => ({
+                userId,
+                status: presence.status,
+                lastSeen: presence.lastSeen,
+                statusMessage: presence.statusMessage,
+            }));
+
+            client.emit('bulk_presence_response', {
+                presences: presenceList,
+                onlineCount,
+                timestamp: Date.now()
+            });
+
+        } catch (error) {
+            this.logger.error(`Bulk presence request error:`, error);
+        }
+    }
+
+    /**
+     * Request presence for specific user
+     */
+    @SubscribeMessage('get_user_presence')
+    async handleGetUserPresence(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { userId: string },
+    ) {
+        try {
+            const requesterId = this.socketToUser.get(client.id);
+            if (!requesterId) {
+                this.logger.warn('User presence request: User not authenticated');
+                return;
+            }
+
+            // TODO: Check if requester can see target user's presence
+            // This would integrate with friends/contacts service
+
+            const presence = await this.presenceService.getUserPresence(data.userId);
+
+            if (presence) {
+                client.emit('user_presence_response', {
+                    userId: data.userId,
+                    status: presence.status,
+                    lastSeen: presence.lastSeen,
+                    statusMessage: presence.statusMessage,
+                });
+            } else {
+                client.emit('user_presence_response', {
+                    userId: data.userId,
+                    status: 'offline',
+                    lastSeen: Date.now(),
+                });
+            }
+
+        } catch (error) {
+            this.logger.error(`User presence request error:`, error);
+        }
+    }
+
+    // ================= PRESENCE HELPER METHODS =================
+
+    /**
+     * Notify user's contacts about presence changes
+     * Broadcasts to contacts when user goes online/offline or changes status
+     */
+    private async notifyContactsAboutPresenceChange(
+        userId: string,
+        status: string
+    ): Promise<void> {
+        try {
+            // Get user's contacts (friends who should see presence updates)
+            const contacts = await this.presenceService.getUserContacts(userId);
+
+            if (contacts.length === 0) {
+                return;
+            }
+
+            // Get full presence info
+            const presence = await this.presenceService.getUserPresence(userId);
+
+            if (!presence) {
+                return;
+            }
+
+            // Create presence notification
+            const presenceNotification = {
+                userId,
+                status: presence.status,
+                lastSeen: presence.lastSeen,
+                statusMessage: presence.statusMessage,
+                timestamp: Date.now()
+            };
+
+            // Broadcast to each contact's presence room
+            for (const contactId of contacts) {
+                this.server.to(`presence:${contactId}`).emit('contact_presence_update', presenceNotification);
+            }
+
+            this.logger.debug(`Notified ${contacts.length} contacts about ${userId}'s presence change to ${status}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to notify contacts about presence change:`, error);
+        }
+    }
+
+    /**
+     * Check if user is currently online
+     * Uses presence service to determine online status
+     */
+    private async isUserOnlineViaPresence(userId: string): Promise<boolean> {
+        try {
+            return await this.presenceService.isUserOnline(userId);
+        } catch (error) {
+            this.logger.error(`Failed to check online status for user ${userId}:`, error);
+            // Fallback to socket tracking
+            return this.isUserOnlineBasic(userId);
+        }
+    }
+
+    /**
+     * Update existing isUserOnline method to use presence service as primary source
+     */
+    private isUserOnline(userId: string): boolean {
+        const userSockets = this.connectedUsers.get(userId);
+        return userSockets ? userSockets.size > 0 : false;
+    }
+
+    // ================= EVENT LISTENERS FOR PRESENCE =================
+
+    /**
+     * Listen to presence events from PresenceService
+     * These are emitted when presence changes via service methods
+     */
+
+    @OnEvent('presence.user.online')
+    async handleUserOnlineEvent(event: any) {
+        // Already handled in connection handler and notifyContactsAboutPresenceChange
+        this.logger.debug(`User ${event.userId} came online`);
+    }
+
+    @OnEvent('presence.user.offline')
+    async handleUserOfflineEvent(event: any) {
+        // Already handled in disconnection handler and notifyContactsAboutPresenceChange
+        this.logger.debug(`User ${event.userId} went offline`);
+    }
+
+    @OnEvent('presence.user.status_change')
+    async handleUserStatusChangeEvent(event: any) {
+        // Already handled in updatePresence handler and notifyContactsAboutPresenceChange
+        this.logger.debug(`User ${event.userId} changed status to ${event.status}`);
+    }
+
+    // ================= LASTMESSAGE EVENT HANDLERS =================
+
+    /**
+     * Get lastMessages for multiple conversations
+     * Client requests fresh lastMessage data (e.g., after app launch)
+     */
+    @SubscribeMessage('get_conversations_last_messages')
+    async handleGetConversationsLastMessages(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: GetConversationsLastMessagesDto,
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Get lastMessages: User not authenticated');
+                return;
+            }
+
+            // Get lastMessages from service
+            const lastMessages = await this.lastMessageService.getBulkConversationsLastMessages(
+                data.conversationIds,
+                userId
+            );
+
+            // Convert to response format
+            const updates: ConversationLastMessageUpdate[] = [];
+
+            for (const [conversationId, lastMessage] of lastMessages.entries()) {
+                const unreadCount = await this.lastMessageService.getUnreadCount(conversationId, userId);
+
+                updates.push({
+                    conversationId,
+                    lastMessage,
+                    unreadCount,
+                    lastActivity: lastMessage.timestamp
+                });
+            }
+
+            // Send response to client
+            client.emit('conversations_last_messages_response', {
+                updates,
+                timestamp: Date.now()
+            });
+
+            this.logger.debug(`Sent lastMessages for ${data.conversationIds.length} conversations to user ${userId}`);
+
+        } catch (error) {
+            this.logger.error(`Get lastMessages error:`, error);
+        }
+    }
+
+    // ================= LASTMESSAGE HELPER METHODS =================
+
+    /**
+     * Update lastMessage and broadcast to conversation participants
+     * Called when new message is sent
+     */
+    private async updateAndBroadcastLastMessage(
+        message: any,
+        conversationId: string,
+        senderId: string
+    ): Promise<void> {
+        try {
+            // Get sender name for lastMessage
+            const senderName = await this.getUserDisplayName(senderId);
+
+            // Create message data with sender name
+            const messageWithSender = {
+                ...message,
+                senderName: senderName
+            };
+
+            // Update lastMessage in service
+            await this.lastMessageService.updateLastMessageOnSend(
+                messageWithSender,
+                conversationId
+            );
+
+            // Get conversation participants
+            const participants = await this.getConversationParticipants(conversationId);
+
+            // Broadcast lastMessage update to each participant
+            for (const participantId of participants) {
+                // Get user-specific data (read status, unread count)
+                const lastMessage = await this.lastMessageService.getConversationLastMessage(
+                    conversationId,
+                    participantId
+                );
+
+                if (lastMessage) {
+                    const unreadCount = await this.lastMessageService.getUnreadCount(
+                        conversationId,
+                        participantId
+                    );
+
+                    // Send to participant's user room
+                    this.server.to(`user:${participantId}`).emit('conversation_last_message_update', {
+                        conversationId,
+                        lastMessage,
+                        unreadCount,
+                        timestamp: Date.now()
+                    });
+                }
+            }
+
+            this.logger.debug(`Broadcasted lastMessage update for conversation ${conversationId} to ${participants.length} participants`);
+
+        } catch (error) {
+            this.logger.error(`Failed to update and broadcast lastMessage:`, error);
+        }
+    }
+
+    /**
+     * Update lastMessage read status and broadcast
+     * Called when messages are marked as read
+     */
+    private async updateLastMessageReadStatus(
+        conversationId: string,
+        messageIds: string[],
+        userId: string
+    ): Promise<void> {
+        try {
+            // Get current lastMessage
+            const lastMessage = await this.lastMessageService.getConversationLastMessage(
+                conversationId,
+                userId
+            );
+
+            if (!lastMessage) {
+                return;
+            }
+
+            // Check if lastMessage is in the read messages
+            const isLastMessageRead = messageIds.includes(lastMessage.messageId);
+
+            if (isLastMessageRead) {
+                // Update read status for lastMessage
+                await this.lastMessageService.updateLastMessageReadStatus(
+                    conversationId,
+                    lastMessage.messageId,
+                    userId,
+                    true
+                );
+
+                // Get updated lastMessage
+                const updatedLastMessage = await this.lastMessageService.getConversationLastMessage(
+                    conversationId,
+                    userId
+                );
+
+                if (updatedLastMessage) {
+                    const unreadCount = await this.lastMessageService.getUnreadCount(
+                        conversationId,
+                        userId
+                    );
+
+                    // Broadcast update to user
+                    this.server.to(`user:${userId}`).emit('conversation_last_message_update', {
+                        conversationId,
+                        lastMessage: updatedLastMessage,
+                        unreadCount,
+                        timestamp: Date.now()
+                    });
+
+                    this.logger.debug(`Updated lastMessage read status for conversation ${conversationId}, user ${userId}`);
+                }
+            }
+
+        } catch (error) {
+            this.logger.error(`Failed to update lastMessage read status:`, error);
+        }
+    }
+
+    // ================= EVENT LISTENERS FOR LASTMESSAGE SERVICE =================
+
+    /**
+     * Listen to lastMessage events from LastMessageService
+     */
+
+    @OnEvent('lastmessage.updated')
+    async handleLastMessageUpdated(event: {
+        conversationId: string;
+        lastMessage: any;
+        trigger: string;
+        timestamp: number;
+    }) {
+        // Already handled in updateAndBroadcastLastMessage
+        this.logger.debug(`LastMessage updated for conversation ${event.conversationId} - trigger: ${event.trigger}`);
+    }
+
+    @OnEvent('lastmessage.read_status_updated')
+    async handleLastMessageReadStatusUpdated(event: {
+        conversationId: string;
+        messageId: string;
+        userId: string;
+        isRead: boolean;
+        timestamp: number;
+    }) {
+        // Additional processing if needed
+        this.logger.debug(`LastMessage read status updated for conversation ${event.conversationId}`);
     }
 }

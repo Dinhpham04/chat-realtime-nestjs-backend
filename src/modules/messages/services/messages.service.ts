@@ -554,4 +554,274 @@ export class MessagesService implements IExtendedMessageService {
             }
         }
     }
+
+    /**
+     * Mark message as delivered
+     */
+    async markAsDelivered(messageId: string, userId: string, deliveredAt: number): Promise<void> {
+        try {
+            // Update message in database with updatedAt timestamp
+            await this.messageRepository.updateMessageStatus(messageId, {
+                status: MessageStatus.DELIVERED, // This will be stored in a separate status collection
+                updatedAt: new Date(deliveredAt)
+            });
+
+            // Emit delivery event
+            this.eventEmitter.emit('message.delivered', {
+                messageId,
+                userId,
+                deliveredAt,
+                timestamp: Date.now()
+            });
+
+            this.logger.log(`Message ${messageId} marked as delivered by user ${userId}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to mark message ${messageId} as delivered:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get message by ID
+     */
+    async getMessageById(messageId: string): Promise<MessageResponseDto | null> {
+        try {
+            const message = await this.messageRepository.findById(messageId);
+
+            if (!message) {
+                return null;
+            }
+
+            return {
+                id: message._id.toString(),
+                conversationId: message.conversationId.toString(),
+                senderId: message.senderId.toString(),
+                content: message.content || '',
+                type: message.messageType,
+                status: MessageStatus.SENT, // Default status since we don't have it in schema
+                attachments: [], // Default empty array since not in basic schema
+                mentions: [], // Default empty array since not in basic schema
+                replyTo: message.replyTo ? {
+                    messageId: message.replyTo.toString(),
+                    content: '',
+                    senderId: '',
+                    senderName: ''
+                } : undefined,
+                createdAt: message.createdAt,
+                updatedAt: message.updatedAt,
+                delivery: undefined // Not implemented yet
+            };
+
+        } catch (error) {
+            this.logger.error(`Failed to get message by ID ${messageId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get delivery status for multiple messages
+     */
+    async getMessagesDeliveryStatus(messageIds: string[], requesterId: string): Promise<Array<{
+        messageId: string;
+        deliveryStatus: Array<{
+            userId: string;
+            status: 'sent' | 'delivered' | 'read';
+            timestamp: Date;
+        }>;
+    }>> {
+        try {
+            const deliveryStatuses: Array<{
+                messageId: string;
+                deliveryStatus: Array<{
+                    userId: string;
+                    status: 'sent' | 'delivered' | 'read';
+                    timestamp: Date;
+                }>;
+            }> = [];
+
+            for (const messageId of messageIds) {
+                // Get message to verify requester has access
+                const message = await this.messageRepository.findById(messageId);
+
+                if (!message) {
+                    continue;
+                }
+
+                // Check if requester is the sender
+                if (message.senderId.toString() !== requesterId) {
+                    // TODO: Add proper conversation access check when ConversationsService method is available
+                    continue;
+                }
+
+                // TODO: Implement proper delivery status tracking
+                // For now, return basic status based on message timestamps
+                const deliveryStatus = {
+                    messageId,
+                    deliveryStatus: [{
+                        userId: message.senderId.toString(),
+                        status: 'sent' as const,
+                        timestamp: message.createdAt
+                    }]
+                };
+
+                deliveryStatuses.push(deliveryStatus);
+            }
+
+            return deliveryStatuses;
+
+        } catch (error) {
+            this.logger.error(`Failed to get delivery status for messages:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get recent messages for conversation (optimized for chat history)
+     * Fast loading for initial chat display
+     */
+    async getRecentMessages(
+        conversationId: string,
+        limit: number = 50,
+        before?: string,
+        userContext?: UserContext
+    ): Promise<{
+        messages: MessageResponseDto[];
+        hasMore: boolean;
+        oldestMessageId?: string;
+        total: number;
+    }> {
+        try {
+            // Build pagination query
+            const pagination = {
+                limit: Math.min(limit, 100), // Max 100 messages
+                cursor: before,
+                sortOrder: 'desc' as const, // Latest first
+            };
+
+            // Get messages with pagination
+            const result = await this.messageRepository.findByConversationId(
+                conversationId,
+                pagination
+            );
+
+            // Transform to response DTOs
+            const messages = await Promise.all(
+                result.data.map(async (message) => {
+                    return {
+                        id: message._id.toString(),
+                        conversationId: message.conversationId.toString(),
+                        senderId: message.senderId.toString(),
+                        content: message.content || '',
+                        type: message.messageType,
+                        status: MessageStatus.SENT, // Default status
+                        attachments: [], // TODO: Implement attachments
+                        mentions: [], // TODO: Implement mentions
+                        replyTo: message.replyTo ? {
+                            messageId: message.replyTo.toString(),
+                            content: '',
+                            senderId: '',
+                            senderName: ''
+                        } : undefined,
+                        createdAt: message.createdAt,
+                        updatedAt: message.updatedAt,
+                        delivery: undefined
+                    } as MessageResponseDto;
+                })
+            );
+
+            // Get total count for conversation
+            const totalCount = await this.messageRepository.countByConversationId(conversationId);
+
+            return {
+                messages: messages.reverse(), // Return in chronological order
+                hasMore: result.pagination.page < result.pagination.totalPages,
+                oldestMessageId: messages.length > 0 ? messages[0].id : undefined,
+                total: result.pagination.total
+            };
+
+        } catch (error) {
+            this.logger.error(`Failed to get recent messages for conversation ${conversationId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get messages around a specific message (for jump to message feature)
+     */
+    async getMessagesAround(
+        conversationId: string,
+        messageId: string,
+        contextLimit: number = 25,
+        userContext?: UserContext
+    ): Promise<{
+        messages: MessageResponseDto[];
+        targetMessage: MessageResponseDto;
+        hasMoreBefore: boolean;
+        hasMoreAfter: boolean;
+    }> {
+        try {
+            // Get the target message first
+            const targetMessage = await this.getMessageById(messageId);
+            if (!targetMessage) {
+                throw new NotFoundException(`Message ${messageId} not found`);
+            }
+
+            // Get messages before the target message
+            const messagesBefore = await this.messageRepository.getMessagesBeforeMessage(
+                conversationId,
+                messageId,
+                contextLimit
+            );
+
+            // Get messages after the target message
+            const messagesAfter = await this.messageRepository.getMessagesAfterMessage(
+                conversationId,
+                messageId,
+                contextLimit
+            );
+
+            // Transform to response DTOs
+            const transformMessage = (message: any): MessageResponseDto => ({
+                id: message._id.toString(),
+                conversationId: message.conversationId.toString(),
+                senderId: message.senderId.toString(),
+                content: message.content || '',
+                type: message.messageType,
+                status: MessageStatus.SENT,
+                attachments: [],
+                mentions: [],
+                replyTo: message.replyTo ? {
+                    messageId: message.replyTo.toString(),
+                    content: '',
+                    senderId: '',
+                    senderName: ''
+                } : undefined,
+                createdAt: message.createdAt,
+                updatedAt: message.updatedAt,
+                delivery: undefined
+            });
+
+            const beforeMessages = messagesBefore.map(transformMessage);
+            const afterMessages = messagesAfter.map(transformMessage);
+
+            // Combine all messages in chronological order
+            const allMessages = [
+                ...beforeMessages.reverse(), // Oldest first
+                targetMessage,
+                ...afterMessages
+            ];
+
+            return {
+                messages: allMessages,
+                targetMessage,
+                hasMoreBefore: messagesBefore.length === contextLimit,
+                hasMoreAfter: messagesAfter.length === contextLimit
+            };
+
+        } catch (error) {
+            this.logger.error(`Failed to get messages around ${messageId}:`, error);
+            throw error;
+        }
+    }
 }

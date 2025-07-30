@@ -216,6 +216,43 @@ export class MessageRepository implements IMessageRepository {
   }
 
   /**
+   * Update message status (for delivery tracking)
+   */
+  async updateMessageStatus(id: string, status: { status: any; updatedAt: Date }): Promise<MessageDocument | null> {
+    try {
+      if (!Types.ObjectId.isValid(id)) {
+        return null;
+      }
+
+      // Since our basic Message schema doesn't have status field, 
+      // we'll just update the updatedAt timestamp for now
+      // In a full implementation, this would update a separate status collection
+      const updatedMessage = await this.messageModel
+        .findOneAndUpdate(
+          {
+            _id: new Types.ObjectId(id),
+            isDeleted: false
+          },
+          {
+            updatedAt: status.updatedAt
+            // TODO: In a full implementation, update status in separate collection
+          },
+          { new: true }
+        )
+        .exec();
+
+      if (updatedMessage) {
+        this.logger.debug(`Updated message status: ${id} to ${status.status}`);
+      }
+
+      return updatedMessage;
+    } catch (error) {
+      this.logger.error(`Failed to update message status ${id}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Mark message as read
    */
   async markAsRead(messageId: string, userId: string): Promise<boolean> {
@@ -610,25 +647,6 @@ export class MessageRepository implements IMessageRepository {
   }
 
   /**
-   * Count messages in conversation
-   */
-  async countByConversationId(conversationId: string): Promise<number> {
-    try {
-      const count = await this.messageModel
-        .countDocuments({
-          conversationId,
-          isDeleted: false
-        })
-        .exec();
-
-      return count;
-    } catch (error) {
-      this.logger.error(`Failed to count messages in conversation ${conversationId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
    * Find latest message in conversation
    */
   async findLatestInConversation(conversationId: string): Promise<MessageDocument | null> {
@@ -665,6 +683,91 @@ export class MessageRepository implements IMessageRepository {
       return messages;
     } catch (error) {
       this.logger.error(`Failed to find messages by sender ${senderId}:`, error);
+      throw error;
+    }
+  }
+
+  // =============== CHAT HISTORY OPERATIONS ===============
+
+  /**
+   * Get messages before a specific message (for context loading)
+   */
+  async getMessagesBeforeMessage(
+    conversationId: string,
+    messageId: string,
+    limit: number
+  ): Promise<MessageDocument[]> {
+    try {
+      // First get the target message to get its timestamp
+      const targetMessage = await this.messageModel.findById(messageId).exec();
+      if (!targetMessage) {
+        throw new Error(`Target message ${messageId} not found`);
+      }
+
+      const messages = await this.messageModel
+        .find({
+          conversationId: new Types.ObjectId(conversationId),
+          createdAt: { $lt: targetMessage.createdAt },
+          isDeleted: false
+        })
+        .sort({ createdAt: -1 }) // Latest first
+        .limit(limit)
+        .exec();
+
+      return messages;
+    } catch (error) {
+      this.logger.error(`Failed to get messages before ${messageId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get messages after a specific message (for context loading)
+   */
+  async getMessagesAfterMessage(
+    conversationId: string,
+    messageId: string,
+    limit: number
+  ): Promise<MessageDocument[]> {
+    try {
+      // First get the target message to get its timestamp
+      const targetMessage = await this.messageModel.findById(messageId).exec();
+      if (!targetMessage) {
+        throw new Error(`Target message ${messageId} not found`);
+      }
+
+      const messages = await this.messageModel
+        .find({
+          conversationId: new Types.ObjectId(conversationId),
+          createdAt: { $gt: targetMessage.createdAt },
+          isDeleted: false
+        })
+        .sort({ createdAt: 1 }) // Oldest first
+        .limit(limit)
+        .exec();
+
+      return messages;
+    } catch (error) {
+      this.logger.error(`Failed to get messages after ${messageId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Count total messages in conversation
+   */
+  async countByConversationId(conversationId: string): Promise<number> {
+    try {
+      const count = await this.messageModel
+        .countDocuments({
+          conversationId: new Types.ObjectId(conversationId),
+          isDeleted: false
+        })
+        .exec();
+
+      return count;
+    } catch (error) {
+      this.logger.error(`Failed to count messages in conversation ${conversationId}:`, error);
       throw error;
     }
   }
