@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import { IFileRepository, IMessageAttachmentRepository } from '../interfaces/repository.interface';
 import { FileValidationService, FileInfo } from './file-validation.service';
 import { StorageService } from './storage.service';
+import { ThumbnailGenerationService } from './thumbnail-generation.service';
 import { File } from '../schemas/file.schema';
 import { MessageAttachment } from '../schemas/message-attachment.schema';
 import { InitiateUploadDto, GenerateDownloadUrlDto, GetUserFilesDto } from '../dto/file.dto';
@@ -39,6 +40,7 @@ export class FilesService {
         private readonly attachmentRepository: IMessageAttachmentRepository,
         private readonly validationService: FileValidationService,
         private readonly storageService: StorageService,
+        private readonly thumbnailService: ThumbnailGenerationService,
     ) { }
 
     /**
@@ -107,13 +109,41 @@ export class FilesService {
 
         this.logger.log(`File uploaded successfully: ${fileId}`);
 
+        // Generate thumbnail if supported
+        let thumbnailUrl: string | undefined = undefined;
+        if (this.thumbnailService.isThumbnailSupported(fileInfo.mimeType)) {
+            try {
+                const thumbnailResult = await this.thumbnailService.generateThumbnail(
+                    fileInfo.buffer!,
+                    fileInfo.mimeType,
+                    fileId,
+                    userId
+                );
+
+                if (thumbnailResult) {
+                    thumbnailUrl = thumbnailResult.thumbnailUrl;
+
+                    // Update file record with thumbnail path
+                    await this.fileRepository.updateById(fileId, {
+                        thumbnailPath: thumbnailResult.thumbnailPath
+                    });
+
+                    this.logger.log(`Thumbnail generated for file: ${fileId}`);
+                }
+            } catch (error) {
+                this.logger.warn(`Failed to generate thumbnail for ${fileId}:`, error);
+                // Continue without thumbnail - don't fail the upload
+            }
+        }
+
         return {
             fileId: savedFile.fileId,
             fileName: savedFile.fileName,
             originalName: savedFile.originalFilename,
             fileSize: savedFile.fileSize,
             mimeType: savedFile.mimeType,
-            downloadUrl: storageResult.url,
+            downloadUrl: await this.storageService.getSignedUrl(savedFile.fileId, userId),
+            thumbnailUrl,
             isNew: true
         };
     }
@@ -229,7 +259,7 @@ export class FilesService {
         await this.getFile(fileId, userId);
 
         // Rate limiting check (simplified)
-        await this.checkDownloadRateLimit(userId);
+        // await this.checkDownloadRateLimit(userId);
 
         // Generate signed URL using Redis token service
         const downloadUrl = await this.storageService.getSignedUrl(
@@ -481,13 +511,44 @@ export class FilesService {
 
             this.logger.log(`File record created from chunks: ${fileInfo.fileId}`);
 
+            // Generate thumbnail if supported (for chunk uploads, we need to read the file from storage)
+            let thumbnailUrl: string | undefined = undefined;
+            if (this.thumbnailService.isThumbnailSupported(fileInfo.mimeType)) {
+                try {
+                    // Read the assembled file from storage to generate thumbnail
+                    const fileBuffer = await this.storageService.downloadFile(fileInfo.fileId);
+
+                    const thumbnailResult = await this.thumbnailService.generateThumbnail(
+                        fileBuffer,
+                        fileInfo.mimeType,
+                        fileInfo.fileId,
+                        userId
+                    );
+
+                    if (thumbnailResult) {
+                        thumbnailUrl = thumbnailResult.thumbnailUrl;
+
+                        // Update file record with thumbnail path
+                        await this.fileRepository.updateById(fileInfo.fileId, {
+                            thumbnailPath: thumbnailResult.thumbnailPath
+                        });
+
+                        this.logger.log(`Thumbnail generated for chunked file: ${fileInfo.fileId}`);
+                    }
+                } catch (error) {
+                    this.logger.warn(`Failed to generate thumbnail for chunked file ${fileInfo.fileId}:`, error);
+                    // Continue without thumbnail - don't fail the upload
+                }
+            }
+
             return {
                 fileId: savedFile.fileId,
                 fileName: savedFile.fileName,
                 originalName: savedFile.originalFilename,
                 fileSize: savedFile.fileSize,
                 mimeType: savedFile.mimeType,
-                downloadUrl: `${this.storageService['baseUrl']}/files/download/${savedFile.fileId}`,
+                downloadUrl: await this.storageService.getSignedUrl(savedFile.fileId, userId),
+                thumbnailUrl,
                 isNew: true
             };
         } catch (error) {

@@ -228,7 +228,7 @@ export class UsersRepository implements IUsersRepository {
 
       return await this.userModel
         .find(filter)
-        .select('username fullName avatarUrl isOnline')
+        .select('username phoneNumber fullName avatarUrl isOnline')
         .limit(limit || 10)
         .sort({ isOnline: -1, username: 1 }) // Sort by online status and then by username
         .exec();

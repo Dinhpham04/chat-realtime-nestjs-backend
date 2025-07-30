@@ -53,7 +53,7 @@ export class StorageService implements IStorageService {
 
             return {
                 path: relativePath,
-                url: `${this.baseUrl}/files/download/${fileId}`,
+                url: `${this.baseUrl}/api/v1/files/download/${fileId}`,
                 size: buffer.length
             };
         } catch (error) {
@@ -127,7 +127,7 @@ export class StorageService implements IStorageService {
                 maxDownloads
             });
 
-            return `${this.baseUrl}/files/download/${fileId}?token=${token}`;
+            return `${this.baseUrl}/api/v1/files/download/${fileId}?token=${token}`;
         } catch (error) {
             this.logger.error(`Failed to generate signed URL for ${fileId}:`, error);
             throw new InternalServerErrorException('Failed to generate download URL');
@@ -148,7 +148,7 @@ export class StorageService implements IStorageService {
     ): Promise<string> {
         try {
             const token = await this.redisDownloadTokenService.generateOneTimeToken(fileId, userId, expiresIn);
-            return `${this.baseUrl}/files/download/${fileId}?token=${token}`;
+            return `${this.baseUrl}/api/v1/files/download/${fileId}?token=${token}`;
         } catch (error) {
             this.logger.error(`Failed to generate one-time URL for ${fileId}:`, error);
             throw new InternalServerErrorException('Failed to generate one-time download URL');
@@ -169,7 +169,7 @@ export class StorageService implements IStorageService {
     ): Promise<string> {
         try {
             const token = await this.redisDownloadTokenService.generatePreviewToken(fileId, userId, expiresIn);
-            return `${this.baseUrl}/files/preview/${fileId}?token=${token}`;
+            return `${this.baseUrl}/api/v1/files/preview/${fileId}?token=${token}`;
         } catch (error) {
             this.logger.error(`Failed to generate preview URL for ${fileId}:`, error);
             throw new InternalServerErrorException('Failed to generate preview URL');

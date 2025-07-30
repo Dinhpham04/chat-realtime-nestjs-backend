@@ -1,0 +1,1849 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💬 Chat & File Messaging Test App</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+            height: 100vh;
+        }
+
+        .sidebar {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+            overflow-y: auto;
+        }
+
+        .main-chat {
+            display: flex;
+            flex-direction: column;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4757;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.connected {
+            background: #2ed573;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.1);
+                opacity: 0.7;
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .messages-container {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            max-width: 70%;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.sent {
+            margin-left: auto;
+        }
+
+        .message.received {
+            margin-right: auto;
+        }
+
+        .message-bubble {
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            position: relative;
+        }
+
+        .message.sent .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message.received .message-bubble {
+            background: white;
+            border: 1px solid #e1e8ed;
+            color: #333;
+        }
+
+        .message-info {
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 5px;
+        }
+
+        .file-attachment {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 10px;
+            margin-top: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .message.received .file-attachment {
+            background: #f1f3f4;
+            border: 1px solid #e1e8ed;
+        }
+
+        .file-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+
+        .file-details {
+            display: flex;
+            align-items: center;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .file-size {
+            font-size: 11px;
+            opacity: 0.8;
+        }
+
+        .download-btn {
+            background: #4facfe;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 11px;
+            text-decoration: none;
+            display: inline-block;
+            transition: background 0.3s ease;
+        }
+
+        .download-btn:hover {
+            background: #2980b9;
+        }
+
+        .message-input-area {
+            background: white;
+            padding: 20px;
+            border-top: 1px solid #e1e8ed;
+        }
+
+        .input-container {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .message-input {
+            flex: 1;
+            border: 2px solid #e1e8ed;
+            border-radius: 25px;
+            padding: 12px 20px;
+            font-size: 14px;
+            resize: none;
+            max-height: 100px;
+            min-height: 44px;
+        }
+
+        .message-input:focus {
+            outline: none;
+            border-color: #4facfe;
+        }
+
+        .input-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .action-btn {
+            width: 44px;
+            height: 44px;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .file-btn {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        .send-btn {
+            background: #4facfe;
+            color: white;
+        }
+
+        .action-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            backdrop-filter: blur(5px);
+        }
+
+        .section h3 {
+            margin-bottom: 10px;
+            color: #333;
+            font-size: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+
+        .btn {
+            background: #4facfe;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.3s ease;
+            width: 100%;
+            margin-bottom: 8px;
+        }
+
+        .btn:hover {
+            background: #3498db;
+        }
+
+        .btn-success {
+            background: #2ed573;
+        }
+
+        .btn-warning {
+            background: #ffa502;
+        }
+
+        .btn-danger {
+            background: #ff4757;
+        }
+
+        .btn-success:hover {
+            background: #27ae60;
+        }
+
+        .btn-warning:hover {
+            background: #e67e22;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        .file-upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
+        }
+
+        .file-upload-area.dragover {
+            border-color: #4facfe;
+            background: rgba(79, 172, 254, 0.1);
+        }
+
+        .upload-result {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 11px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .upload-result.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+        }
+
+        .upload-result.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+        }
+
+        .debug-log {
+            background: #2c3e50;
+            color: #ecf0f1;
+            border-radius: 8px;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .typing-indicator {
+            display: none;
+            padding: 10px 20px;
+            font-style: italic;
+            color: #666;
+            font-size: 12px;
+        }
+
+        .typing-dots {
+            display: inline-block;
+            animation: typing 1.4s infinite;
+        }
+
+        @keyframes typing {
+
+            0%,
+            60%,
+            100% {
+                opacity: 0;
+            }
+
+            30% {
+                opacity: 1;
+            }
+        }
+
+        .file-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .file-preview-item {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 11px;
+            max-width: 150px;
+        }
+
+        .batch-files {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 10px;
+            margin-top: 8px;
+        }
+
+        .batch-file-item {
+            display: flex;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .batch-file-item:last-child {
+            border-bottom: none;
+        }
+
+        @media (max-width: 768px) {
+            .app-container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 1fr;
+                height: 100vh;
+            }
+
+            .sidebar {
+                max-height: 200px;
+                overflow-y: auto;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <!-- Connection Section -->
+            <div class="section">
+                <h3><i class="fas fa-wifi"></i> Kết nối</h3>
+                <div class="connection-status">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="connectionText">Disconnected</span>
+                </div>
+                <div class="form-group">
+                    <label>Access Token</label>
+                    <textarea class="form-control" id="accessToken" placeholder="Nhập JWT access token..." rows="3"
+                        style="font-family: monospace; font-size: 10px;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Device ID</label>
+                    <input type="text" class="form-control" id="deviceId" placeholder="test_device_web_123">
+                </div>
+                <div class="form-group">
+                    <label>User Info</label>
+                    <div id="userInfo"
+                        style="font-size: 11px; color: #666; background: #f8f9fa; padding: 8px; border-radius: 5px; min-height: 30px;">
+                        Chưa kết nối
+                    </div>
+                </div>
+                <button type="button" class="btn" onclick="connect()">
+                    <i class="fas fa-plug"></i> Kết nối
+                </button>
+                <button type="button" class="btn btn-danger" onclick="disconnect()">
+                    <i class="fas fa-unplug"></i> Ngắt kết nối
+                </button>
+                <button type="button" class="btn btn-warning" onclick="clearToken()">
+                    <i class="fas fa-eraser"></i> Xóa Token
+                </button>
+            </div>
+
+            <!-- Conversation Settings -->
+            <div class="section">
+                <h3><i class="fas fa-comments"></i> Cuộc trò chuyện</h3>
+                <div class="form-group">
+                    <label>ID Cuộc trò chuyện</label>
+                    <input type="text" class="form-control" id="conversationId" value="test_conv_123">
+                </div>
+                <div class="form-group">
+                    <label>Loại tin nhắn</label>
+                    <select class="form-control" id="messageType">
+                        <option value="text">📝 Văn bản</option>
+                        <option value="image">🖼️ Hình ảnh</option>
+                        <option value="audio">🎵 Âm thanh</option>
+                        <option value="video">🎥 Video</option>
+                        <option value="document">📄 Tài liệu</option>
+                        <option value="file">📎 Tệp</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- File Upload Section -->
+            <div class="section">
+                <h3><i class="fas fa-cloud-upload-alt"></i> Tải tệp lên</h3>
+                <div class="file-upload-area" id="fileUploadArea">
+                    <i class="fas fa-cloud-upload-alt" style="font-size: 24px; color: #ccc; margin-bottom: 10px;"></i>
+                    <p style="margin: 0; font-size: 12px; color: #666;">
+                        Kéo thả tệp vào đây hoặc nhấp để chọn
+                    </p>
+                    <input type="file" id="fileInput" accept="*/*" multiple style="display: none;">
+                </div>
+                <div class="file-preview" id="filePreview"></div>
+                <button type="button" class="btn" onclick="uploadFiles(event)">
+                    <i class="fas fa-upload"></i> Tải lên Server
+                </button>
+                <div class="upload-result" id="uploadResult"></div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="section">
+                <h3><i class="fas fa-bolt"></i> Thao tác nhanh</h3>
+                <button type="button" class="btn btn-success" onclick="sendQuickMessage()">
+                    <i class="fas fa-paper-plane"></i> Gửi tin nhanh
+                </button>
+                <button type="button" class="btn btn-warning" onclick="shareFiles()">
+                    <i class="fas fa-share"></i> Chia sẻ tệp
+                </button>
+                <button type="button" class="btn" onclick="shareSingleFile()">
+                    <i class="fas fa-file"></i> Chia sẻ 1 file
+                </button>
+                <button type="button" class="btn" onclick="sendDeliveryReceipt()">
+                    <i class="fas fa-check"></i> Gửi xác nhận đã nhận
+                </button>
+                <button type="button" class="btn" onclick="sendReadReceipt()">
+                    <i class="fas fa-check-double"></i> Đánh dấu đã đọc
+                </button>
+                <button type="button" class="btn" onclick="joinConversations()">
+                    <i class="fas fa-users"></i> Tham gia conversation
+                </button>
+                <button type="button" class="btn btn-danger" onclick="clearChat()">
+                    <i class="fas fa-trash"></i> Xóa chat
+                </button>
+            </div>
+
+            <!-- Sample Tokens -->
+            <div class="section">
+                <h3><i class="fas fa-key"></i> Token mẫu</h3>
+                <div style="font-size: 10px; margin-bottom: 10px; color: #666;">
+                    Click để sử dụng token test
+                </div>
+                <button type="button" class="btn" onclick="useSampleToken('user1')"
+                    style="margin-bottom: 5px; font-size: 10px;">
+                    👤 User 1 (68...d1)
+                </button>
+                <button type="button" class="btn" onclick="useSampleToken('user2')"
+                    style="margin-bottom: 5px; font-size: 10px;">
+                    👤 User 2 (Sample)
+                </button>
+                <div style="font-size: 9px; color: #999; margin-top: 5px;">
+                    Hoặc paste token JWT từ postman/browser
+                </div>
+            </div>
+
+            <!-- Debug Section -->
+            <div class="section">
+                <h3><i class="fas fa-bug"></i> Debug</h3>
+                <div class="debug-log" id="debugLog"></div>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="main-chat">
+            <!-- Chat Header -->
+            <div class="chat-header">
+                <div class="connection-status">
+                    <div class="status-dot" id="statusDot2"></div>
+                    <span id="connectionText2">Disconnected</span>
+                </div>
+                <h2><i class="fas fa-comments"></i> Chat & File Messaging Test</h2>
+                <p style="font-size: 12px; opacity: 0.8;">Test các chức năng gửi tin nhắn và chia sẻ tệp</p>
+            </div>
+
+            <!-- Messages Container -->
+            <div class="messages-container" id="messagesContainer">
+                <div class="message received">
+                    <div class="message-bubble">
+                        <p>👋 Chào mừng đến với ứng dụng test messaging!</p>
+                        <p style="font-size: 12px; margin-top: 5px; opacity: 0.8;">
+                            • Gửi tin nhắn văn bản<br>
+                            • Upload và chia sẻ tệp<br>
+                            • Test các loại file khác nhau<br>
+                            • Theo dõi trạng thái real-time
+                        </p>
+                    </div>
+                    <div class="message-info">System • vừa xong</div>
+                </div>
+            </div>
+
+            <!-- Typing Indicator -->
+            <div class="typing-indicator" id="typingIndicator">
+                <span class="typing-dots">Đang nhập...</span>
+            </div>
+
+            <!-- Message Input Area -->
+            <div class="message-input-area">
+                <div class="input-container">
+                    <textarea class="message-input" id="messageInput" placeholder="Nhập tin nhắn..." rows="1"
+                        onkeydown="handleKeyDown(event)" oninput="handleInputChange()"></textarea>
+                    <div class="input-actions">
+                        <button type="button" class="action-btn file-btn" onclick="triggerFileUpload()"
+                            title="Đính kèm tệp">
+                            <i class="fas fa-paperclip"></i>
+                        </button>
+                        <button type="button" class="action-btn send-btn" id="sendBtn" onclick="sendMessage(event)"
+                            title="Gửi tin nhắn">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let socket = null;
+        let currentFilesMetadata = [];
+        let isConnected = false;
+        let typingTimer = null;
+        let currentUser = null;
+
+        // ================= TOKEN & USER MANAGEMENT =================
+
+        function parseJWTToken(token) {
+            try {
+                const base64Url = token.split('.')[1];
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
+                return JSON.parse(jsonPayload);
+            } catch (error) {
+                console.error('Error parsing JWT token:', error);
+                return null;
+            }
+        }
+
+        function updateUserInfo(token) {
+            const userInfoDiv = document.getElementById('userInfo');
+
+            if (!token) {
+                userInfoDiv.innerHTML = 'Chưa kết nối';
+                currentUser = null;
+                return;
+            }
+
+            const payload = parseJWTToken(token);
+            if (payload) {
+                currentUser = {
+                    userId: payload.sub,
+                    phoneNumber: payload.phoneNumber,
+                    deviceId: payload.deviceId,
+                    roles: payload.roles,
+                    exp: payload.exp,
+                    iat: payload.iat
+                };
+
+                const expDate = new Date(payload.exp * 1000);
+                const isExpired = expDate < new Date();
+
+                userInfoDiv.innerHTML = `
+                    <div style="margin-bottom: 5px;">
+                        <strong>User ID:</strong> ${payload.sub || 'N/A'}<br>
+                        <strong>Phone:</strong> ${payload.phoneNumber || 'N/A'}<br>
+                        <strong>Device:</strong> ${payload.deviceId || 'N/A'}<br>
+                        <strong>Roles:</strong> ${(payload.roles || []).join(', ')}<br>
+                        <strong>Expires:</strong> <span style="color: ${isExpired ? '#e74c3c' : '#27ae60'};">
+                            ${expDate.toLocaleString('vi-VN')} ${isExpired ? '(Hết hạn)' : ''}
+                        </span>
+                    </div>
+                `;
+            } else {
+                userInfoDiv.innerHTML = '<span style="color: #e74c3c;">Token không hợp lệ</span>';
+                currentUser = null;
+            }
+        }
+
+        function clearToken() {
+            document.getElementById('accessToken').value = '';
+            updateUserInfo(null);
+            if (socket && socket.connected) {
+                disconnect();
+            }
+        }
+
+        function generateDeviceId() {
+            const timestamp = Date.now();
+            const random = Math.random().toString(36).substr(2, 9);
+            return `test_device_web_${timestamp}_${random}`;
+        }
+
+        function useSampleToken(userType) {
+            const sampleTokens = {
+                'user1': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ODc4YWRiNjljNDE3ODk1NzdiM2I5ZDEiLCJwaG9uZU51bWJlciI6Iis4NDkwMTIzNDU2NyIsImRldmljZUlkIjoibW9iaWxlX2RldmljZV8xMjM0NSIsInJvbGVzIjpbInVzZXIiXSwidHlwZSI6ImFjY2VzcyIsImlhdCI6MTc1Mzc5MjU0MiwiZXhwIjoxNzUzODAxNTQyfQ.HFrrJlCTNLh80VmfPXg5h2KY1D1Jd-1W4cfV2thdCQk',
+                'user2': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ODc4YWRiNjljNDE3ODk1NzdiM2I5ZDIiLCJwaG9uZU51bWJlciI6Iis4NDkwMTIzNDU2OCIsImRldmljZUlkIjoibW9iaWxlX2RldmljZV8xMjM0NiIsInJvbGVzIjpbInVzZXIiXSwidHlwZSI6ImFjY2VzcyIsImlhdCI6MTc1Mzc5MjU0MiwiZXhwIjoxNzUzODAxNTQyfQ.sample_token_for_user2'
+            };
+
+            const token = sampleTokens[userType];
+            if (token) {
+                document.getElementById('accessToken').value = token;
+                updateUserInfo(token);
+                localStorage.setItem('chatapp_token', token);
+                addMessage('system', `📋 Đã sử dụng token ${userType}`, 'received');
+            }
+        }
+
+        // ================= CONNECTION MANAGEMENT =================
+
+        function connect() {
+            if (socket && socket.connected) {
+                addMessage('system', 'Đã kết nối rồi!', 'received');
+                return;
+            }
+
+            // Get token from input
+            const token = document.getElementById('accessToken').value.trim();
+            if (!token) {
+                addMessage('system', '❌ Vui lòng nhập access token!', 'received');
+                document.getElementById('accessToken').focus();
+                return;
+            }
+
+            // Validate token format
+            const payload = parseJWTToken(token);
+            if (!payload) {
+                addMessage('system', '❌ Token không hợp lệ! Vui lòng kiểm tra lại.', 'received');
+                return;
+            }
+
+            // Check if token is expired
+            const expDate = new Date(payload.exp * 1000);
+            if (expDate < new Date()) {
+                addMessage('system', '❌ Token đã hết hạn! Vui lòng sử dụng token mới.', 'received');
+                return;
+            }
+
+            // Get or generate device ID
+            let deviceId = document.getElementById('deviceId').value.trim();
+            if (!deviceId) {
+                deviceId = generateDeviceId();
+                document.getElementById('deviceId').value = deviceId;
+            }
+
+            // Update user info
+            updateUserInfo(token);
+
+            socket = io('http://localhost:3000/chat', {
+                auth: {
+                    token: token,
+                    deviceId: deviceId,
+                    deviceType: 'web',
+                    platform: 'web'
+                }
+            });
+
+            // Connection events
+            socket.on('connect', () => {
+                updateConnectionStatus(true);
+                const userDisplay = currentUser ? `${currentUser.phoneNumber || currentUser.userId}` : 'User';
+                addMessage('system', `✅ Kết nối thành công! Chào mừng ${userDisplay}`, 'received');
+                addDebugLog('Connected to server', {
+                    socketId: socket.id,
+                    user: currentUser,
+                    deviceId: deviceId
+                });
+
+                // Auto-join the test conversation
+                const conversationId = document.getElementById('conversationId').value;
+                if (conversationId) {
+                    const joinData = {
+                        conversationIds: [conversationId]
+                    };
+                    socket.emit('join_conversations', joinData);
+                    addDebugLog('Auto-joined conversation', joinData);
+                    addMessage('system', `👥 Đã tự động tham gia conversation: ${conversationId}`, 'received');
+                }
+            });
+
+            socket.on('disconnect', () => {
+                updateConnectionStatus(false);
+                addMessage('system', '❌ Mất kết nối!', 'received');
+                addDebugLog('Disconnected from server');
+            });
+
+            socket.on('connect_error', (error) => {
+                updateConnectionStatus(false);
+                addMessage('system', `❌ Lỗi kết nối: ${error.message}`, 'received');
+                addDebugLog('Connection error', error, 'error');
+
+                // Handle authentication errors
+                if (error.message.includes('Authentication') || error.message.includes('Unauthorized')) {
+                    addMessage('system', '🔑 Token có thể đã hết hạn hoặc không hợp lệ. Vui lòng kiểm tra lại.', 'received');
+                }
+            });
+
+            // Message events
+            socket.on('new_message', (data) => {
+                handleNewMessage(data);
+                addDebugLog('new_message', data);
+            });
+
+            socket.on('new_file_message', (data) => {
+                handleFileMessage(data);
+                addDebugLog('new_file_message', data);
+            });
+
+            socket.on('new_batch_files_message', (data) => {
+                handleBatchFileMessage(data);
+                addDebugLog('new_batch_files_message', data);
+            });
+
+            // Acknowledgment events
+            socket.on('message_received', (data) => {
+                addDebugLog('message_received', data);
+                if (data.status === 'processed') {
+                    // Server processed successfully - add sender's message to UI
+                    const messageContent = data.content || 'Tin nhắn';
+                    const senderDisplay = currentUser ? (currentUser.phoneNumber || currentUser.userId) : 'You';
+                    addMessage(senderDisplay, messageContent, 'sent', data.localId, data.filesInfo || []);
+                    updateMessageStatus(data.localId, 'sent');
+                } else {
+                    updateMessageStatus(data.localId, 'pending');
+                }
+            });
+
+            socket.on('file_shared', (data) => {
+                addDebugLog('file_shared', data);
+                // Add sender's file message to UI when server confirms
+                const senderDisplay = currentUser ? (currentUser.phoneNumber || currentUser.userId) : 'You';
+                const message = data.message || 'Chia sẻ tệp';
+                addMessage(senderDisplay, `📁 ${message}`, 'sent', data.localId, data.fileInfo ? [data.fileInfo] : []);
+                updateMessageStatus(data.localId, 'sent');
+            });
+
+            socket.on('quick_file_shared', (data) => {
+                addDebugLog('quick_file_shared', data);
+                // Add sender's quick file message to UI when server confirms
+                const senderDisplay = currentUser ? (currentUser.phoneNumber || currentUser.userId) : 'You';
+                const message = data.message || 'Chia sẻ tệp nhanh';
+                addMessage(senderDisplay, `📤 ${message}`, 'sent', data.localId, data.fileInfo ? [data.fileInfo] : []);
+                updateMessageStatus(data.localId, 'sent');
+            });
+
+            socket.on('batch_files_shared', (data) => {
+                addDebugLog('batch_files_shared', data);
+                // Add sender's batch files message to UI when server confirms
+                const senderDisplay = currentUser ? (currentUser.phoneNumber || currentUser.userId) : 'You';
+                const message = data.message || 'Chia sẻ nhiều tệp';
+                const fileCount = data.filesInfo ? data.filesInfo.length : 0;
+                addMessage(senderDisplay, `📤 ${message} (${fileCount} tệp)`, 'sent', data.localId, data.filesInfo || []);
+                updateMessageStatus(data.localId, 'sent');
+            });
+
+            // Error events
+            socket.on('message_error', (error) => {
+                addMessage('system', `❌ Lỗi gửi tin nhắn: ${error.error}`, 'received');
+                addDebugLog('message_error', error, 'error');
+                updateMessageStatus(error.localId, 'failed');
+            });
+
+            socket.on('share_file_error', (error) => {
+                addMessage('system', `❌ Lỗi chia sẻ file: ${error.error}`, 'received');
+                addDebugLog('share_file_error', error, 'error');
+                updateMessageStatus(error.localId, 'failed');
+            });
+
+            socket.on('quick_share_file_error', (error) => {
+                addMessage('system', `❌ Lỗi chia sẻ file nhanh: ${error.error}`, 'received');
+                addDebugLog('quick_share_file_error', error, 'error');
+                updateMessageStatus(error.localId, 'failed');
+            });
+
+            socket.on('batch_share_files_error', (error) => {
+                addMessage('system', `❌ Lỗi chia sẻ nhiều file: ${error.error}`, 'received');
+                addDebugLog('batch_share_files_error', error, 'error');
+                updateMessageStatus(error.localId, 'failed');
+            });
+        }
+
+        function disconnect() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+            updateConnectionStatus(false);
+            updateUserInfo(null);
+            addMessage('system', '🔌 Đã ngắt kết nối', 'received');
+        }
+
+        function updateConnectionStatus(connected) {
+            isConnected = connected;
+            const statusDots = document.querySelectorAll('.status-dot');
+            const statusTexts = document.querySelectorAll('[id^="connectionText"]');
+
+            statusDots.forEach(dot => {
+                dot.classList.toggle('connected', connected);
+            });
+
+            statusTexts.forEach(text => {
+                text.textContent = connected ? 'Connected' : 'Disconnected';
+            });
+
+            // Update send button state
+            const sendBtn = document.getElementById('sendBtn');
+            sendBtn.disabled = !connected;
+        }
+
+        // ================= FILE UPLOAD MANAGEMENT =================
+
+        function setupFileUpload() {
+            const fileInput = document.getElementById('fileInput');
+            const uploadArea = document.getElementById('fileUploadArea');
+            const filePreview = document.getElementById('filePreview');
+
+            // Click to select files
+            uploadArea.addEventListener('click', () => {
+                fileInput.click();
+            });
+
+            // Drag and drop
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+
+            uploadArea.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+            });
+
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+
+                const files = Array.from(e.dataTransfer.files);
+                handleFileSelection(files);
+            });
+
+            // File input change
+            fileInput.addEventListener('change', (e) => {
+                const files = Array.from(e.target.files);
+                handleFileSelection(files);
+            });
+        }
+
+        function handleFileSelection(files) {
+            if (files.length === 0) return;
+
+            const filePreview = document.getElementById('filePreview');
+            filePreview.innerHTML = '';
+
+            files.forEach((file, index) => {
+                const previewItem = document.createElement('div');
+                previewItem.className = 'file-preview-item';
+                previewItem.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i class="fas ${getFileIcon(file.type)}" style="color: ${getFileColor(file.type)};"></i>
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-weight: bold; font-size: 11px; overflow: hidden; text-overflow: ellipsis;">
+                                ${file.name}
+                            </div>
+                            <div style="font-size: 10px; color: #666;">
+                                ${formatFileSize(file.size)}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                filePreview.appendChild(previewItem);
+            });
+
+            // Auto-set message type
+            if (files.length === 1) {
+                const messageTypeSelect = document.getElementById('messageType');
+                const file = files[0];
+                if (file.type.startsWith('image/')) messageTypeSelect.value = 'image';
+                else if (file.type.startsWith('audio/')) messageTypeSelect.value = 'audio';
+                else if (file.type.startsWith('video/')) messageTypeSelect.value = 'video';
+                else if (file.type.includes('pdf') || file.type.includes('document')) messageTypeSelect.value = 'document';
+                else messageTypeSelect.value = 'file';
+            } else {
+                document.getElementById('messageType').value = 'file';
+            }
+        }
+
+        // ================= COMPREHENSIVE RELOAD PREVENTION =================
+
+        function preventFormSubmission(event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+            }
+            return false;
+        }
+
+        async function uploadFiles(event) {
+            try {
+                // Prevent any form submission behavior
+                preventFormSubmission(event);
+
+                const fileInput = document.getElementById('fileInput');
+                const files = Array.from(fileInput.files);
+                const uploadResult = document.getElementById('uploadResult');
+
+                if (files.length === 0) {
+                    uploadResult.innerHTML = '<div style="color: #e74c3c;">⚠️ Vui lòng chọn tệp trước</div>';
+                    return false;
+                }
+
+                // Get token from input
+                const token = document.getElementById('accessToken').value.trim();
+                if (!token) {
+                    uploadResult.innerHTML = '<div style="color: #e74c3c;">❌ Vui lòng nhập access token!</div>';
+                    return false;
+                }
+
+                // Show loading
+                uploadResult.innerHTML = `
+                    <div style="color: #3498db;">
+                        <i class="fas fa-spinner fa-spin"></i> 
+                        Đang tải lên ${files.length} tệp...
+                    </div>
+                `;
+
+                try {
+                    const formData = new FormData();
+                    files.forEach(file => {
+                        formData.append('files', file);
+                    });
+
+                    const response = await fetch('http://localhost:3000/api/v1/files/upload/batch', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: formData,
+                        redirect: 'manual' // Prevent automatic redirects
+                    });
+
+                    // Check for redirect responses that might cause page reload
+                    if (response.type === 'opaqueredirect') {
+                        throw new Error('Server attempted redirect - blocked to prevent page reload');
+                    }
+
+                    if (!response.ok) {
+                        throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+                    const filesData = result.data.uploadedFiles || result.files || result;
+                    const uploadedFiles = Array.isArray(filesData) ? filesData : [filesData];
+
+                    console.debug('Uploaded files:', uploadedFiles);
+                    currentFilesMetadata = uploadedFiles.map(file => ({
+                        fileId: file.fileId || file.id,
+                        fileName: file.fileName || file.name,
+                        fileSize: file.fileSize || file.size,
+                        mimeType: file.mimeType || file.type,
+                        downloadUrl: file.downloadUrl || file.url,
+                        thumbnailUrl: file.thumbnailUrl,
+                        dimensions: file.dimensions,
+                        duration: file.duration
+                    }));
+
+                    console.debug('Current files metadata:', currentFilesMetadata);
+
+                    uploadResult.className = 'upload-result success';
+                    uploadResult.innerHTML = `
+                        <div style="color: #27ae60; font-weight: bold;">
+                            ✅ Tải lên thành công ${uploadedFiles.length} tệp!
+                        </div>
+                        <div style="margin-top: 10px; font-size: 10px;">
+                            ${uploadedFiles.map(file =>
+                        `📎 ${file.fileName || file.name} (${formatFileSize(file.fileSize || file.size)})`
+                    ).join('<br>')}
+                        </div>
+                    `;
+
+                    addMessage('system', `✅ Đã tải lên ${uploadedFiles.length} tệp`, 'received');
+
+                } catch (error) {
+                    console.error('Upload error:', error);
+                    uploadResult.className = 'upload-result error';
+                    uploadResult.innerHTML = `
+                        <div style="color: #e74c3c; font-weight: bold;">
+                            ❌ Lỗi tải lên: ${error.message}
+                        </div>
+                        <div style="margin-top: 10px; font-size: 10px;">
+                            • Kiểm tra server đang chạy<br>
+                            • Kiểm tra token xác thực<br>
+                            • Kiểm tra CORS settings
+                        </div>
+                    `;
+                }
+            } catch (globalError) {
+                console.error('Global upload error:', globalError);
+                // Prevent any potential page reload from unhandled errors
+                const uploadResult = document.getElementById('uploadResult');
+                if (uploadResult) {
+                    uploadResult.innerHTML = '<div style="color: #e74c3c;">❌ Lỗi không xác định. Vui lòng thử lại.</div>';
+                }
+            }
+
+            return false; // Ensure no form submission
+        }
+
+        // ================= FILE DOWNLOAD MANAGEMENT =================
+
+        async function downloadFile(fileName, downloadUrl) {
+
+            console.log('Attempting to download file:', fileName, downloadUrl);
+            try {
+                // Get token from input
+                const token = document.getElementById('accessToken').value.trim();
+                if (!token) {
+                    addMessage('system', '❌ Vui lòng nhập access token để download!', 'received');
+                    return;
+                }
+
+                // Show loading message
+                addMessage('system', `⬇️ Đang tải xuống: ${fileName}...`, 'received');
+
+                const response = await fetch(`${downloadUrl}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+                }
+
+                // Get the file data as blob
+                const blob = await response.blob();
+
+                // Create a temporary URL for the blob
+                const url = window.URL.createObjectURL(blob);
+
+                // Create a temporary link element and trigger download
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+
+                // Clean up
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                }, 100);
+
+                addMessage('system', `✅ Đã tải xuống thành công: ${fileName}`, 'received');
+
+            } catch (error) {
+                console.error('Download error:', error);
+                addMessage('system', `❌ Lỗi tải xuống: ${error.message}`, 'received');
+
+                // Alternative: Try opening in new tab with token in URL params (less secure but works)
+                try {
+                    const token = document.getElementById('accessToken').value.trim();
+                    const downloadUrl = `http://localhost:3000/api/v1/files/download/${fileId}?token=${encodeURIComponent(token)}`;
+                    window.open(downloadUrl, '_blank');
+                    addMessage('system', `🔗 Đã mở link download trong tab mới (fallback)`, 'received');
+                } catch (fallbackError) {
+                    console.error('Fallback download error:', fallbackError);
+                }
+            }
+        }
+
+        // ================= MESSAGE HANDLING =================
+
+        function sendMessage(event) {
+            try {
+                // Prevent any form submission behavior
+                preventFormSubmission(event);
+
+                if (!socket || !socket.connected) {
+                    addMessage('system', '❌ Chưa kết nối! Vui lòng kết nối trước.', 'received');
+                    return false;
+                }
+
+                const messageInput = document.getElementById('messageInput');
+                const content = messageInput.value.trim();
+                const conversationId = document.getElementById('conversationId').value;
+                const type = document.getElementById('messageType').value;
+
+                if (!content && currentFilesMetadata.length === 0) {
+                    addMessage('system', '⚠️ Vui lòng nhập tin nhắn hoặc chọn tệp', 'received');
+                    return false;
+                }
+
+                const localId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                let messageData = {
+                    localId: localId,
+                    conversationId: conversationId,
+                    content: content,
+                    type: type,
+                    timestamp: Date.now(),
+                };
+
+                // Add file data if present - following the ChatGateway DTO structure
+                if (currentFilesMetadata.length > 0) {
+                    if (currentFilesMetadata.length === 1) {
+                        // Single file - can use either fileId or fileMetadata approach
+                        const file = currentFilesMetadata[0];
+                        if (file.fileId) {
+                            // Option 1: Send fileId only (Secure, recommended)
+                            messageData.fileId = file.fileId;
+                        } else {
+                            // Option 2: Send complete metadata (Performance, less secure)
+                            messageData.fileMetadata = {
+                                fileId: file.fileId || file.id,
+                                fileName: file.fileName,
+                                fileSize: file.fileSize,
+                                mimeType: file.mimeType,
+                                downloadUrl: file.downloadUrl,
+                                thumbnailUrl: file.thumbnailUrl,
+                                duration: file.duration,
+                                dimensions: file.dimensions
+                            };
+                        }
+                    } else {
+                        // Multiple files - use fileIds or filesMetadata approach
+                        const hasAllFileIds = currentFilesMetadata.every(f => f.fileId || f.id);
+
+                        if (hasAllFileIds) {
+                            // Option 3: Batch files - fileIds approach (Secure)
+                            messageData.fileIds = currentFilesMetadata.map(f => f.fileId || f.id);
+                        } else {
+                            // Option 4: Batch files with metadata (Performance)
+                            messageData.filesMetadata = currentFilesMetadata.map(file => ({
+                                fileId: file.fileId || file.id,
+                                fileName: file.fileName,
+                                fileSize: file.fileSize,
+                                mimeType: file.mimeType,
+                                downloadUrl: file.downloadUrl,
+                                thumbnailUrl: file.thumbnailUrl,
+                                duration: file.duration,
+                                dimensions: file.dimensions
+                            }));
+                        }
+                    }
+                }
+
+                // Send via socket (DO NOT add to UI immediately - wait for server confirmation)
+                socket.emit('send_message', messageData);
+                addDebugLog('Sent send_message', messageData);
+
+                // Clear input
+                messageInput.value = '';
+                currentFilesMetadata = [];
+                document.getElementById('filePreview').innerHTML = '';
+                document.getElementById('fileInput').value = '';
+                document.getElementById('uploadResult').innerHTML = '';
+
+                // Reset form
+                resizeTextarea(messageInput);
+                updateSendButton();
+
+                return false; // Ensure no form submission
+            } catch (error) {
+                console.error('Send message error:', error);
+                addMessage('system', '❌ Lỗi gửi tin nhắn. Vui lòng thử lại.', 'received');
+                return false;
+            }
+        }
+
+        function sendQuickMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const quickMessages = [
+                '👋 Xin chào!',
+                '😊 Cảm ơn bạn!',
+                '👍 OK!',
+                '❓ Bạn có khỏe không?',
+                '📞 Gọi cho tôi nhé',
+                '⏰ Hẹn gặp lại sau'
+            ];
+
+            const randomMessage = quickMessages[Math.floor(Math.random() * quickMessages.length)];
+            messageInput.value = randomMessage;
+            sendMessage();
+        }
+
+        function shareFiles() {
+            if (currentFilesMetadata.length === 0) {
+                addMessage('system', '⚠️ Vui lòng tải tệp lên trước', 'received');
+                return;
+            }
+
+            if (!socket || !socket.connected) {
+                addMessage('system', '❌ Chưa kết nối!', 'received');
+                return;
+            }
+
+            const conversationId = document.getElementById('conversationId').value;
+            const message = document.getElementById('messageInput').value || 'Chia sẻ tệp';
+            const localId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            if (currentFilesMetadata.length === 1) {
+                // Quick share single file - matches QuickShareFileDto
+                const file = currentFilesMetadata[0];
+                const shareData = {
+                    fileId: file.fileId || file.id,
+                    conversationId: conversationId,
+                    message: message,
+                    fileMetadata: {
+                        fileName: file.fileName,
+                        fileSize: file.fileSize,
+                        mimeType: file.mimeType,
+                        downloadUrl: file.downloadUrl,
+                        thumbnailUrl: file.thumbnailUrl,
+                        duration: file.duration,
+                        dimensions: file.dimensions
+                    }
+                };
+
+                // Send to server (DO NOT add to UI immediately)
+                socket.emit('quick_share_file', shareData);
+                addDebugLog('Sent quick_share_file', shareData);
+            } else {
+                // Batch share multiple files - matches BatchShareFilesDto
+                const shareData = {
+                    fileIds: currentFilesMetadata.map(f => f.fileId || f.id),
+                    conversationId: conversationId,
+                    message: message,
+                    filesMetadata: currentFilesMetadata.map(file => ({
+                        fileId: file.fileId || file.id,
+                        fileName: file.fileName,
+                        fileSize: file.fileSize,
+                        mimeType: file.mimeType,
+                        downloadUrl: file.downloadUrl,
+                        thumbnailUrl: file.thumbnailUrl,
+                        duration: file.duration,
+                        dimensions: file.dimensions
+                    }))
+                };
+
+                // Send to server (DO NOT add to UI immediately)
+                socket.emit('batch_share_files', shareData);
+                addDebugLog('Sent batch_share_files', shareData);
+            }
+
+            // Clear form
+            document.getElementById('messageInput').value = '';
+            currentFilesMetadata = [];
+            document.getElementById('filePreview').innerHTML = '';
+            document.getElementById('fileInput').value = '';
+            document.getElementById('uploadResult').innerHTML = '';
+        }
+
+        // ================= MESSAGE RENDERING =================
+
+        function addMessage(sender, content, type, localId = null, filesMetadata = []) {
+            const messagesContainer = document.getElementById('messagesContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            if (localId) messageDiv.setAttribute('data-local-id', localId);
+
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.className = 'message-bubble';
+
+            let messageHTML = `<p>${content}</p>`;
+
+            // Add file attachments
+            if (filesMetadata && filesMetadata.length > 0) {
+                if (filesMetadata.length === 1) {
+                    const file = filesMetadata[0];
+                    messageHTML += createFileAttachment(file);
+                } else {
+                    messageHTML += createBatchFileAttachment(filesMetadata);
+                }
+            }
+
+            bubbleDiv.innerHTML = messageHTML;
+            messageDiv.appendChild(bubbleDiv);
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'message-info';
+            const senderDisplay = sender === 'user' && currentUser ?
+                (currentUser.phoneNumber || currentUser.userId) : sender;
+            infoDiv.textContent = `${senderDisplay} • ${formatTime(new Date())}`;
+            messageDiv.appendChild(infoDiv);
+
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function handleNewMessage(data) {
+            let content = data.content || 'Tin nhắn trống';
+            let filesMetadata = [];
+
+            // Handle file information from new ChatGateway structure
+            if (data.fileInfo) {
+                filesMetadata = [data.fileInfo];
+            }
+            if (data.filesInfo) {
+                filesMetadata = data.filesInfo;
+            }
+
+            // Use senderName from the gateway response
+            const senderName = data.senderName || data.senderId || 'Unknown User';
+
+            addMessage(senderName, content, 'received', null, filesMetadata);
+        }
+
+        function handleFileMessage(data) {
+            let filesMetadata = [];
+            if (data.fileInfo) {
+                filesMetadata = [data.fileInfo];
+            }
+
+            addMessage(data.senderName || 'User', data.content || 'Chia sẻ tệp', 'received', null, filesMetadata);
+        }
+
+        function handleBatchFileMessage(data) {
+            let filesMetadata = [];
+            if (data.filesInfo) {
+                filesMetadata = data.filesInfo;
+            }
+
+            addMessage(data.senderName || 'User', data.content || 'Chia sẻ nhiều tệp', 'received', null, filesMetadata);
+        }
+
+        function createFileAttachment(file) {
+            const fileType = getFileTypeFromMimeType(file.mimeType);
+            const fileColor = getFileColor(file.mimeType);
+            const fileIcon = getFileIcon(file.mimeType);
+
+            return `
+                <div class="file-attachment">
+                    <div class="file-details">
+                        <div class="file-icon" style="background: ${fileColor};">
+                            <i class="fas ${fileIcon}"></i>
+                        </div>
+                        <div class="file-info">
+                            <div class="file-name">${file.fileName}</div>
+                            <div class="file-size">${formatFileSize(file.fileSize)}</div>
+                        </div>
+                        <button type="button" class="download-btn" onclick="downloadFile('${file.fileName}','${file.downloadUrl}')">
+                            <i class="fas fa-download"></i> Tải về
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function createBatchFileAttachment(files) {
+            return `
+                <div class="batch-files">
+                    <div style="font-weight: bold; margin-bottom: 8px; font-size: 12px;">
+                        📦 ${files.length} tệp đính kèm
+                    </div>
+                    ${files.map(file => `
+                        <div class="batch-file-item">
+                            <div class="file-icon" style="background: ${getFileColor(file.mimeType)}; width: 30px; height: 30px; font-size: 12px;">
+                                <i class="fas ${getFileIcon(file.mimeType)}"></i>
+                            </div>
+                            <div class="file-info" style="margin-left: 8px; flex: 1;">
+                                <div class="file-name" style="font-size: 11px;">${file.fileName}</div>
+                                <div class="file-size" style="font-size: 10px;">${formatFileSize(file.fileSize)}</div>
+                            </div>
+                            <button type="button" class="download-btn" onclick="downloadFile('${file.fileName}','${file.downloadUrl}')" style="font-size: 10px; padding: 4px 8px;">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function updateMessageStatus(localId, status) {
+            const messageElement = document.querySelector(`[data-local-id="${localId}"]`);
+            if (messageElement) {
+                const infoElement = messageElement.querySelector('.message-info');
+                if (infoElement) {
+                    const statusIcon = status === 'sent' ? '✓' : status === 'delivered' ? '✓✓' : '✓✓';
+                    infoElement.innerHTML += ` <span style="color: #4facfe;">${statusIcon}</span>`;
+                }
+            }
+        }
+
+        // ================= UI HELPER FUNCTIONS =================
+
+        function handleKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function handleInputChange() {
+            const messageInput = document.getElementById('messageInput');
+            resizeTextarea(messageInput);
+            updateSendButton();
+        }
+
+        function resizeTextarea(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 100) + 'px';
+        }
+
+        function updateSendButton() {
+            const messageInput = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const hasContent = messageInput.value.trim().length > 0;
+            const hasFiles = currentFilesMetadata.length > 0;
+
+            sendBtn.disabled = !isConnected || (!hasContent && !hasFiles);
+        }
+
+        function triggerFileUpload() {
+            document.getElementById('fileInput').click();
+        }
+
+        function clearChat() {
+            const messagesContainer = document.getElementById('messagesContainer');
+            messagesContainer.innerHTML = `
+                <div class="message received">
+                    <div class="message-bubble">
+                        <p>💬 Chat đã được xóa sạch!</p>
+                    </div>
+                    <div class="message-info">System • vừa xong</div>
+                </div>
+            `;
+        }
+
+        function sendDeliveryReceipt() {
+            if (!socket || !socket.connected) {
+                addMessage('system', '❌ Chưa kết nối!', 'received');
+                return;
+            }
+
+            const conversationId = document.getElementById('conversationId').value;
+            if (!conversationId) {
+                addMessage('system', '⚠️ Vui lòng nhập conversation ID', 'received');
+                return;
+            }
+
+            // Demo message ID - in real app this would be from received messages
+            const messageId = `msg_${Date.now()}_demo`;
+
+            const deliveryData = {
+                messageId: messageId,
+                conversationId: conversationId,
+                userId: currentUser?.userId || 'demo_user',
+                deliveredAt: Date.now()
+            };
+
+            socket.emit('message_delivered', deliveryData);
+            addDebugLog('Sent message_delivered', deliveryData);
+            addMessage('system', '📬 Đã gửi xác nhận tin nhắn đã nhận', 'received');
+        }
+
+        function sendReadReceipt() {
+            if (!socket || !socket.connected) {
+                addMessage('system', '❌ Chưa kết nối!', 'received');
+                return;
+            }
+
+            const conversationId = document.getElementById('conversationId').value;
+            if (!conversationId) {
+                addMessage('system', '⚠️ Vui lòng nhập conversation ID', 'received');
+                return;
+            }
+
+            // Demo message IDs - in real app these would be from received messages
+            const messageIds = [`msg_${Date.now()}_demo1`, `msg_${Date.now()}_demo2`];
+
+            const readReceiptData = {
+                conversationId: conversationId,
+                messageIds: messageIds,
+                userId: currentUser?.userId || 'demo_user',
+                readAt: Date.now()
+            };
+
+            socket.emit('mark_as_read', readReceiptData);
+            addDebugLog('Sent mark_as_read', readReceiptData);
+            addMessage('system', '👁️ Đã đánh dấu tin nhắn là đã đọc', 'received');
+        }
+
+        function joinConversations() {
+            if (!socket || !socket.connected) {
+                addMessage('system', '❌ Chưa kết nối!', 'received');
+                return;
+            }
+
+            const conversationId = document.getElementById('conversationId').value;
+            if (!conversationId) {
+                addMessage('system', '⚠️ Vui lòng nhập conversation ID', 'received');
+                return;
+            }
+
+            const joinData = {
+                conversationIds: [conversationId]
+            };
+
+            socket.emit('join_conversations', joinData);
+            addDebugLog('Sent join_conversations', joinData);
+            addMessage('system', `👥 Đã tham gia conversation: ${conversationId}`, 'received');
+        }
+
+        function shareSingleFile() {
+            if (currentFilesMetadata.length === 0) {
+                addMessage('system', '⚠️ Vui lòng tải tệp lên trước', 'received');
+                return;
+            }
+
+            if (!socket || !socket.connected) {
+                addMessage('system', '❌ Chưa kết nối!', 'received');
+                return;
+            }
+
+            const conversationId = document.getElementById('conversationId').value;
+            const message = document.getElementById('messageInput').value || 'Chia sẻ tệp đơn';
+            const localId = `share_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            // Use the first file for single file sharing - matches ShareFileDto
+            const file = currentFilesMetadata[0];
+            const shareData = {
+                fileId: file.fileId || file.id,
+                conversationId: conversationId,
+                message: message
+            };
+
+            // Send to server (DO NOT add to UI immediately)
+            socket.emit('share_file', shareData);
+            addDebugLog('Sent share_file', shareData);
+
+            // Clear form
+            document.getElementById('messageInput').value = '';
+        }
+
+        function addDebugLog(event, data = null, type = '') {
+            const debugLog = document.getElementById('debugLog');
+            const logEntry = document.createElement('div');
+            logEntry.style.marginBottom = '5px';
+            logEntry.style.paddingBottom = '5px';
+            logEntry.style.borderBottom = '1px solid #34495e';
+
+            const timestamp = new Date().toLocaleTimeString();
+            logEntry.innerHTML = `
+                <div style="color: #3498db; font-weight: bold;">[${timestamp}] ${event}</div>
+                ${data ? `<pre style="margin: 5px 0; font-size: 9px; color: #ecf0f1;">${JSON.stringify(data, null, 2)}</pre>` : ''}
+            `;
+
+            if (type === 'error') {
+                logEntry.style.color = '#e74c3c';
+            }
+
+            debugLog.appendChild(logEntry);
+            debugLog.scrollTop = debugLog.scrollHeight;
+
+            // Keep only last 10 logs to prevent memory issues
+            while (debugLog.children.length > 10) {
+                debugLog.removeChild(debugLog.firstChild);
+            }
+        }
+
+        // ================= UTILITY FUNCTIONS =================
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatTime(date) {
+            return date.toLocaleTimeString('vi-VN', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function getFileIcon(mimeType) {
+            if (mimeType.startsWith('image/')) return 'fa-image';
+            if (mimeType.startsWith('video/')) return 'fa-video';
+            if (mimeType.startsWith('audio/')) return 'fa-music';
+            if (mimeType.includes('pdf')) return 'fa-file-pdf';
+            if (mimeType.includes('word') || mimeType.includes('doc')) return 'fa-file-word';
+            if (mimeType.includes('excel') || mimeType.includes('sheet')) return 'fa-file-excel';
+            if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint';
+            if (mimeType.includes('zip') || mimeType.includes('rar')) return 'fa-file-archive';
+            return 'fa-file';
+        }
+
+        function getFileColor(mimeType) {
+            if (mimeType.startsWith('image/')) return '#e74c3c';
+            if (mimeType.startsWith('video/')) return '#9b59b6';
+            if (mimeType.startsWith('audio/')) return '#1abc9c';
+            if (mimeType.includes('pdf')) return '#e67e22';
+            if (mimeType.includes('word') || mimeType.includes('doc')) return '#3498db';
+            if (mimeType.includes('excel') || mimeType.includes('sheet')) return '#27ae60';
+            if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return '#f39c12';
+            return '#95a5a6';
+        }
+
+        function getFileTypeFromMimeType(mimeType) {
+            if (mimeType.startsWith('image/')) return 'image';
+            if (mimeType.startsWith('audio/')) return 'audio';
+            if (mimeType.startsWith('video/')) return 'video';
+            if (mimeType.includes('pdf') || mimeType.includes('document') || mimeType.includes('text')) return 'document';
+            return 'file';
+        }
+
+        // ================= INITIALIZATION =================
+
+        document.addEventListener('DOMContentLoaded', function () {
+            setupFileUpload();
+            updateConnectionStatus(false);
+
+            // Generate default device ID
+            document.getElementById('deviceId').value = generateDeviceId();
+
+            // Load saved token if exists
+            const savedToken = localStorage.getItem('chatapp_token');
+            if (savedToken) {
+                document.getElementById('accessToken').value = savedToken;
+                updateUserInfo(savedToken);
+            }
+
+            // Save token when input changes
+            document.getElementById('accessToken').addEventListener('input', function () {
+                const token = this.value.trim();
+                if (token) {
+                    localStorage.setItem('chatapp_token', token);
+                    updateUserInfo(token);
+                } else {
+                    localStorage.removeItem('chatapp_token');
+                    updateUserInfo(null);
+                }
+            });
+
+            // COMPREHENSIVE RELOAD PREVENTION
+
+            // Prevent all form submissions
+            document.addEventListener('submit', function (e) {
+                console.log('Form submission prevented:', e.target);
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            }, true);
+
+            // Prevent Enter key form submissions (except in textarea)
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' && e.target.type !== 'textarea') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }
+            }, true);
+
+            // Prevent any accidental navigation
+            window.addEventListener('beforeunload', function (e) {
+                // Only show warning if user is connected to chat
+                if (socket && socket.connected) {
+                    const confirmationMessage = 'Bạn có chắc muốn rời khỏi trang? Kết nối chat sẽ bị ngắt.';
+                    e.returnValue = confirmationMessage;
+                    return confirmationMessage;
+                }
+            });
+
+            // Add global error handler for fetch
+            window.addEventListener('unhandledrejection', function (e) {
+                console.error('Unhandled promise rejection (may prevent reload):', e.reason);
+                e.preventDefault(); // Prevent potential page reload from unhandled errors
+            });
+
+            // Add extra protection against any form-related page reloads
+            window.addEventListener('submit', function (e) {
+                console.warn('Submit event detected and blocked:', e.target);
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+            }, true);
+
+            // Intercept all button clicks to ensure no form submission
+            document.addEventListener('click', function (e) {
+                if (e.target.tagName === 'BUTTON' && e.target.type !== 'button') {
+                    console.warn('Non-button type detected and prevented:', e.target);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }
+            }, true);
+
+            console.log('🚀 Chat & File Messaging Test App loaded successfully with reload prevention!');
+            addDebugLog('App initialized with comprehensive reload prevention', {
+                timestamp: new Date().toISOString(),
+                preventionFeatures: [
+                    'Form submission prevention',
+                    'Enter key prevention',
+                    'Fetch redirect blocking',
+                    'Unhandled error prevention',
+                    'Navigation warning'
+                ]
+            });
+        });
+    </script>
+</body>
+
+</html>

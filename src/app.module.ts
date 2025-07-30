@@ -18,6 +18,7 @@ import {
   RequestIdMiddleware,
 } from './shared';
 import { FriendsModule } from './modules/friends/friends.module';
+import { FilesModule } from './modules/files/files.module';
 import { SocketModule } from './socket/socket.module';
 
 @Module({
@@ -42,6 +43,7 @@ import { SocketModule } from './socket/socket.module';
     AuthModule,
     ConversationsModule,
     FriendsModule,
+    FilesModule,
   ],
   controllers: [AppController],
   providers: [

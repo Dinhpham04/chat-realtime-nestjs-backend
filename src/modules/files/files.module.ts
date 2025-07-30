@@ -18,6 +18,7 @@ import { ChunkUploadSessionRepository } from './repositories/chunk-upload-sessio
 // Services
 import { FileValidationService } from './services/file-validation.service';
 import { StorageService } from './services/storage.service';
+import { ThumbnailGenerationService } from './services/thumbnail-generation.service';
 import { FilesService } from './services/files.service';
 import { ChunkUploadService } from './services/chunk-upload.service';
 
@@ -73,6 +74,7 @@ import { ChunkUploadController } from './controllers/chunk-upload.controller';
         // Services
         FileValidationService,
         StorageService,
+        ThumbnailGenerationService,
         FilesService,
         ChunkUploadService,
     ],
@@ -88,6 +90,7 @@ import { ChunkUploadController } from './controllers/chunk-upload.controller';
         // Export services for other modules
         FileValidationService,
         StorageService,
+        ThumbnailGenerationService,
         FilesService,
         ChunkUploadService,
     ],

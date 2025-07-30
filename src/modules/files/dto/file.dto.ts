@@ -2,6 +2,68 @@ import { IsNotEmpty, IsString, IsNumber, IsOptional, IsEnum, IsArray, Min, Max }
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
+/**
+ * DTO for single file upload (no additional metadata needed - handled by multer)
+ * Following file.schema.ts requirements
+ */
+export class UploadSingleFileDto {
+    @ApiProperty({
+        description: 'File to upload',
+        type: 'string',
+        format: 'binary',
+        required: true
+    })
+    file: any; // This is handled by multer, not validated here
+}
+
+/**
+ * DTO for file metadata (auto-generated from uploaded file)
+ * Based on file.schema.ts structure
+ */
+export class FileMetadataDto {
+    @ApiProperty({ description: 'Original filename from user' })
+    originalFilename: string;
+
+    @ApiProperty({ description: 'System-generated filename' })
+    fileName: string;
+
+    @ApiProperty({ description: 'MIME type of the file' })
+    mimeType: string;
+
+    @ApiProperty({ description: 'File size in bytes' })
+    fileSize: number;
+
+    @ApiProperty({ description: 'SHA-256 checksum for deduplication' })
+    checksum: string;
+
+    @ApiProperty({ description: 'Storage path' })
+    storagePath: string;
+
+    @ApiProperty({ description: 'User ID who uploaded the file' })
+    uploadedBy: string;
+
+    @ApiProperty({ description: 'Processing status', default: false })
+    isProcessed: boolean;
+
+    @ApiProperty({ description: 'Virus scan status', default: 'pending' })
+    virusScanStatus: string;
+
+    @ApiProperty({ description: 'Soft delete status', default: true })
+    isActive: boolean;
+
+    @ApiProperty({ description: 'Download count', default: 0 })
+    downloadCount: number;
+
+    @ApiProperty({ description: 'Optional file metadata', required: false })
+    metadata?: {
+        width?: number;
+        height?: number;
+        duration?: number;
+        compression?: string;
+        encoding?: string;
+    };
+}
+
 export class InitiateUploadDto {
     @IsNotEmpty()
     @IsString()

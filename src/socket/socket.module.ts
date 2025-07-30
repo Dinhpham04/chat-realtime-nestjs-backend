@@ -8,7 +8,7 @@ import { ConversationsModule } from '../modules/conversations/conversations.modu
 import { MessagesModule } from '../modules/messages/messages.module';
 import { FilesModule } from '../modules/files/files.module';
 import { ChatGateway } from './gateways/chat.gateway';
-import { FileUploadGateway } from './gateways/file-upload.gateway';
+// import { FileUploadGateway } from './gateways/file-upload.gateway';
 import { SocketController } from './controllers/socket.controller';
 import {
     SocketAuthService,
@@ -16,7 +16,6 @@ import {
     MessageOptimizationService,
     DeviceSyncService,
     SocketCleanupService,
-    FileChatIntegrationService,
 } from './services';
 
 @Module({
@@ -33,17 +32,16 @@ import {
     controllers: [SocketController],
     providers: [
         ChatGateway,
-        FileUploadGateway,
+        // FileUploadGateway,
         SocketAuthService,
         MessageQueueService,
         MessageOptimizationService,
         DeviceSyncService,
         SocketCleanupService,
-        FileChatIntegrationService,
     ],
     exports: [
         ChatGateway,
-        FileUploadGateway,
+        // FileUploadGateway,
         MessageQueueService,
     ],
 })

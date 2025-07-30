@@ -65,7 +65,7 @@ import {
   LeaveConversationApiDocs
 } from '../documentation/participant-management.api-docs';
 
-@Controller('api/v1/conversations')
+@Controller('conversations')
 @UseGuards(JwtAuthGuard)
 @ApiTags('Conversations')
 @ApiBearerAuth('JWT-auth')

@@ -1,8 +1,9 @@
-import { Injectable, BadRequestException, Logger, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
 import { StorageService } from './storage.service';
 import { FileValidationService } from './file-validation.service';
+import { FilesService } from './files.service';
 import { FILE_CONSTANTS } from '../constants/file.constants';
 import {
     RedisChunkSessionService
@@ -49,6 +50,8 @@ export class ChunkUploadService {
         private readonly redisSessionService: RedisChunkSessionService,
         private readonly storageService: StorageService,
         private readonly validationService: FileValidationService,
+        @Inject(forwardRef(() => FilesService))
+        private readonly filesService: FilesService,
     ) { }
 
     /**
@@ -265,6 +268,7 @@ export class ChunkUploadService {
         fileSize: number;
         mimeType: string;
         downloadUrl: string;
+        thumbnailUrl?: string;
     }> {
         this.logger.log(`Completing chunk upload for session ${uploadId}`);
 
@@ -323,6 +327,9 @@ export class ChunkUploadService {
                 this.logger.log(`Final file checksum verified: ${finalChecksum}`);
             }
 
+            // Calculate final checksum for the assembled file (for FilesService)
+            const computedChecksum = crypto.createHash('sha256').update(assembledBuffer).digest('hex');
+
             // Validate assembled file using FileValidationService
             const assembledValidation = this.validationService.validateAssembledFile(assembledBuffer, {
                 fileName: session.fileName,
@@ -341,6 +348,19 @@ export class ChunkUploadService {
                 session.mimeType,
             );
 
+            // Use FilesService to create file record with thumbnail generation
+            const fileResult = await this.filesService.createFileFromChunks(
+                {
+                    fileId,
+                    originalName: session.fileName,
+                    mimeType: session.mimeType,
+                    size: session.totalSize,
+                    checksum: computedChecksum
+                },
+                userId,
+                uploadResult.path
+            );
+
             // Mark session as completed
             await this.redisSessionService.updateStatus(uploadId, 'completed');
 
@@ -352,11 +372,12 @@ export class ChunkUploadService {
             this.logger.log(`Chunk upload completed successfully: ${fileId}`);
 
             return {
-                fileId,
-                fileName: session.fileName,
-                fileSize: session.totalSize,
-                mimeType: session.mimeType,
-                downloadUrl: uploadResult.url,
+                fileId: fileResult.fileId,
+                fileName: fileResult.fileName,
+                fileSize: fileResult.fileSize,
+                mimeType: fileResult.mimeType,
+                downloadUrl: fileResult.downloadUrl,
+                thumbnailUrl: fileResult.thumbnailUrl,
             };
         } catch (error) {
             this.logger.error(`Failed to complete chunk upload for session ${uploadId}: ${error.message}`);
