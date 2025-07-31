@@ -326,19 +326,10 @@ export class ConversationRepository implements IConversationRepository {
             ...(type && { 'conversation.type': type }),
           },
         },
-        // Add search filter if provided
-        ...(search ? [{
-          $match: {
-            $or: [
-              { 'conversation.name': { $regex: search, $options: 'i' } },
-              { 'conversation.lastMessage.content': { $regex: search, $options: 'i' } },
-            ],
-          },
-        }] : []),
         // Lookup participant count
         {
           $lookup: {
-            from: 'conversationparticipants',
+            from: 'conversation_participants',
             let: { conversationId: '$conversationId' },
             pipeline: [
               {
@@ -356,13 +347,102 @@ export class ConversationRepository implements IConversationRepository {
             as: 'participantCount',
           },
         },
-        // Project final structure
+
+        // For direct conversations, lookup the other participant's user info
+        {
+          $lookup: {
+            from: 'conversation_participants',
+            let: {
+              conversationId: '$conversationId',
+              currentUserId: '$userId'
+            },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$conversationId', '$$conversationId'] },
+                      { $ne: ['$userId', '$$currentUserId'] }, // Get the other participant
+                      { $not: { $ifNull: ['$leftAt', false] } } // Active participants
+                    ]
+                  }
+                }
+              },
+              {
+                $lookup: {
+                  from: 'users_core',
+                  localField: 'userId',
+                  foreignField: '_id',
+                  as: 'userInfo'
+                }
+              },
+              { $unwind: '$userInfo' },
+              {
+                $project: {
+                  userId: 1,
+                  fullName: '$userInfo.fullName',
+                  username: '$userInfo.username',
+                  avatarUrl: '$userInfo.avatarUrl'
+                }
+              }
+            ],
+            as: 'otherParticipant',
+          },
+        },
+
+        // Add search filter after getting user info (for direct conversations)
+        ...(search ? [{
+          $match: {
+            $or: [
+              // Search in group conversation names
+              {
+                $and: [
+                  { 'conversation.type': 'group' },
+                  { 'conversation.name': { $regex: search, $options: 'i' } }
+                ]
+              },
+              // Search in direct conversation participant names
+              {
+                $and: [
+                  { 'conversation.type': 'direct' },
+                  {
+                    $or: [
+                      { 'otherParticipant.fullName': { $regex: search, $options: 'i' } },
+                      { 'otherParticipant.username': { $regex: search, $options: 'i' } }
+                    ]
+                  }
+                ]
+              },
+              // Search in last message content
+              { 'conversation.lastMessage.content': { $regex: search, $options: 'i' } },
+            ],
+          },
+        }] : []),
+
+        // Project final structure with dynamic name based on conversation type
         {
           $project: {
             id: '$conversation._id',
             type: '$conversation.type',
-            name: '$conversation.name',
-            avatarUrl: '$conversation.avatarUrl',
+            name: {
+              $cond: {
+                if: { $eq: ['$conversation.type', 'direct'] },
+                then: {
+                  $ifNull: [
+                    { $arrayElemAt: ['$otherParticipant.fullName', 0] },
+                    { $arrayElemAt: ['$otherParticipant.username', 0] }
+                  ]
+                },
+                else: '$conversation.name'
+              }
+            },
+            avatarUrl: {
+              $cond: {
+                if: { $eq: ['$conversation.type', 'direct'] },
+                then: { $arrayElemAt: ['$otherParticipant.avatarUrl', 0] },
+                else: '$conversation.avatarUrl'
+              }
+            },
             participantCount: { $ifNull: [{ $arrayElemAt: ['$participantCount.count', 0] }, 0] },
             lastMessage: '$conversation.lastMessage',
             unreadCount: '$readStatus.unreadCount',
@@ -398,6 +478,7 @@ export class ConversationRepository implements IConversationRepository {
       ];
 
       const conversations = await this.participantModel.aggregate(resultPipeline);
+
 
       return {
         conversations: conversations as ConversationListItem[],

@@ -299,6 +299,8 @@ export class ConversationsController {
       unreadOnly: query.unreadOnly
     });
 
+    this.logger.debug(`found conversation: `, result.conversations);
+
     const responseTime = Date.now() - startTime;
 
     this.logger.log(

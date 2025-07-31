@@ -22,11 +22,11 @@
         }
 
         .app-container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
             display: grid;
-            grid-template-columns: 300px 1fr;
+            grid-template-columns: 280px 320px 1fr;
             gap: 20px;
             height: 100vh;
         }
@@ -38,6 +38,205 @@
             backdrop-filter: blur(10px);
             box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
             overflow-y: auto;
+        }
+
+        .conversations-sidebar {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .conversations-header {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .conversations-search {
+            padding: 15px;
+            border-bottom: 1px solid #e1e8ed;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .search-input:focus {
+            border-color: #667eea;
+        }
+
+        .conversations-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .conversation-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            position: relative;
+        }
+
+        .conversation-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .conversation-item.active {
+            background-color: #e3f2fd;
+            border-right: 3px solid #667eea;
+        }
+
+        .conversation-avatar {
+            position: relative;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+
+        .avatar {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+
+        .online-indicator {
+            position: absolute;
+            bottom: 2px;
+            right: 2px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #2ed573;
+            border: 2px solid white;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .online-indicator.online {
+            opacity: 1;
+        }
+
+        .conversation-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .conversation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .conversation-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .conversation-time {
+            font-size: 11px;
+            color: #666;
+            flex-shrink: 0;
+        }
+
+        .last-message {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .last-message-content {
+            font-size: 12px;
+            color: #666;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+
+        .last-message-content .sender {
+            font-weight: 500;
+            color: #555;
+        }
+
+        .conversation-badges {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            flex-shrink: 0;
+            margin-left: 5px;
+        }
+
+        .unread-count {
+            background: #ff4757;
+            color: white;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            min-width: 16px;
+            text-align: center;
+        }
+
+        .read-status {
+            font-size: 10px;
+            color: #4facfe;
+        }
+
+        .read-status.unread {
+            color: #ccc;
+        }
+
+        .new-conversation-btn {
+            position: sticky;
+            bottom: 15px;
+            left: 15px;
+            right: 15px;
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 13px;
+            transition: transform 0.2s ease;
+            margin: 15px;
+        }
+
+        .new-conversation-btn:hover {
+            transform: translateY(-2px);
         }
 
         .main-chat {
@@ -469,13 +668,17 @@
                 max-height: 200px;
                 overflow-y: auto;
             }
+
+            .conversations-sidebar {
+                display: none;
+            }
         }
     </style>
 </head>
 
 <body>
     <div class="app-container">
-        <!-- Sidebar -->
+        <!-- Sidebar Controls -->
         <div class="sidebar">
             <!-- Connection Section -->
             <div class="section">
@@ -569,6 +772,16 @@
                 <button type="button" class="btn" onclick="joinConversations()">
                     <i class="fas fa-users"></i> Tham gia conversation
                 </button>
+                <button type="button" class="btn btn-secondary" onclick="refreshCurrentConversation()">
+                    <i class="fas fa-sync-alt"></i> Tải lại tin nhắn
+                </button>
+                <button type="button" class="btn btn-info" onclick="manualRequestLastMessages()"
+                    style="font-size: 10px;">
+                    <i class="fas fa-comments"></i> Request LastMessages
+                </button>
+                <button type="button" class="btn btn-success" onclick="testPresence()" style="font-size: 10px;">
+                    <i class="fas fa-eye"></i> Test Presence
+                </button>
                 <button type="button" class="btn btn-danger" onclick="clearChat()">
                     <i class="fas fa-trash"></i> Xóa chat
                 </button>
@@ -598,6 +811,29 @@
                 <h3><i class="fas fa-bug"></i> Debug</h3>
                 <div class="debug-log" id="debugLog"></div>
             </div>
+        </div>
+
+        <!-- Conversations Sidebar -->
+        <div class="conversations-sidebar">
+            <div class="conversations-header">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <i class="fas fa-comments"></i>
+                    <span>Conversations</span>
+                </div>
+            </div>
+
+            <div class="conversations-search">
+                <input type="text" class="search-input" placeholder="Tìm kiếm cuộc trò chuyện..."
+                    id="conversationSearch" oninput="filterConversations()">
+            </div>
+
+            <div class="conversations-list" id="conversationsList">
+                <!-- Conversations will be populated here -->
+            </div>
+
+            <button class="new-conversation-btn" onclick="showNewConversationDialog()">
+                <i class="fas fa-plus"></i> Cuộc trò chuyện mới
+            </button>
         </div>
 
         <!-- Main Chat Area -->
@@ -660,6 +896,14 @@
         let isConnected = false;
         let typingTimer = null;
         let currentUser = null;
+        let conversations = [];
+        let currentConversationId = null;
+        let userPresences = new Map();
+        let conversationLastMessages = new Map();
+
+        // Cache cho message history của mỗi conversation
+        let conversationMessages = new Map(); // Map<conversationId, Array<messages>>
+        let conversationMessagesLoaded = new Map(); // Map<conversationId, boolean>
 
         // ================= TOKEN & USER MANAGEMENT =================
 
@@ -867,6 +1111,37 @@
                     const senderDisplay = currentUser ? (currentUser.phoneNumber || currentUser.userId) : 'You';
                     addMessage(senderDisplay, messageContent, 'sent', data.localId, data.filesInfo || []);
                     updateMessageStatus(data.localId, 'sent');
+
+                    // Add to message cache for current conversation
+                    if (currentConversationId) {
+                        addNewMessageToCache(currentConversationId, {
+                            messageId: data.messageId || data.localId,
+                            content: messageContent,
+                            messageType: 'text',
+                            senderId: currentUser?.userId,
+                            senderName: senderDisplay,
+                            timestamp: Date.now(),
+                            filesInfo: data.filesInfo || []
+                        });
+
+                        // Update lastMessage for current conversation
+                        conversationLastMessages.set(currentConversationId, {
+                            lastMessage: {
+                                messageId: data.messageId || data.localId,
+                                content: messageContent,
+                                messageType: 'text',
+                                senderId: currentUser?.userId,
+                                senderName: senderDisplay,
+                                timestamp: Date.now(),
+                                isRead: true
+                            },
+                            unreadCount: 0,
+                            lastActivity: Date.now()
+                        });
+
+                        // Update conversation list
+                        renderConversations();
+                    }
                 } else {
                     updateMessageStatus(data.localId, 'pending');
                 }
@@ -879,6 +1154,19 @@
                 const message = data.message || 'Chia sẻ tệp';
                 addMessage(senderDisplay, `📁 ${message}`, 'sent', data.localId, data.fileInfo ? [data.fileInfo] : []);
                 updateMessageStatus(data.localId, 'sent');
+
+                // Add to message cache
+                if (currentConversationId) {
+                    addNewMessageToCache(currentConversationId, {
+                        messageId: data.messageId || data.localId,
+                        content: `📁 ${message}`,
+                        messageType: 'file',
+                        senderId: currentUser?.userId,
+                        senderName: senderDisplay,
+                        timestamp: Date.now(),
+                        fileInfo: data.fileInfo
+                    });
+                }
             });
 
             socket.on('quick_file_shared', (data) => {
@@ -888,6 +1176,19 @@
                 const message = data.message || 'Chia sẻ tệp nhanh';
                 addMessage(senderDisplay, `📤 ${message}`, 'sent', data.localId, data.fileInfo ? [data.fileInfo] : []);
                 updateMessageStatus(data.localId, 'sent');
+
+                // Add to message cache
+                if (currentConversationId) {
+                    addNewMessageToCache(currentConversationId, {
+                        messageId: data.messageId || data.localId,
+                        content: `📤 ${message}`,
+                        messageType: 'file',
+                        senderId: currentUser?.userId,
+                        senderName: senderDisplay,
+                        timestamp: Date.now(),
+                        fileInfo: data.fileInfo
+                    });
+                }
             });
 
             socket.on('batch_files_shared', (data) => {
@@ -898,6 +1199,19 @@
                 const fileCount = data.filesInfo ? data.filesInfo.length : 0;
                 addMessage(senderDisplay, `📤 ${message} (${fileCount} tệp)`, 'sent', data.localId, data.filesInfo || []);
                 updateMessageStatus(data.localId, 'sent');
+
+                // Add to message cache
+                if (currentConversationId) {
+                    addNewMessageToCache(currentConversationId, {
+                        messageId: data.messageId || data.localId,
+                        content: `📤 ${message} (${fileCount} tệp)`,
+                        messageType: 'files',
+                        senderId: currentUser?.userId,
+                        senderName: senderDisplay,
+                        timestamp: Date.now(),
+                        filesInfo: data.filesInfo
+                    });
+                }
             });
 
             // Error events
@@ -924,6 +1238,103 @@
                 addDebugLog('batch_share_files_error', error, 'error');
                 updateMessageStatus(error.localId, 'failed');
             });
+
+            // ================= PRESENCE EVENTS =================
+            socket.on('user_presence_response', (data) => {
+                userPresences.set(data.userId, {
+                    status: data.status,
+                    lastSeen: data.lastSeen,
+                    statusMessage: data.statusMessage,
+                    deviceCount: data.deviceCount || 0
+                });
+                updateConversationPresence(data.userId, data.status);
+                addDebugLog('user_presence_response', data);
+            });
+
+            socket.on('contact_presence_update', (data) => {
+                userPresences.set(data.userId, {
+                    status: data.status,
+                    lastSeen: data.lastSeen,
+                    statusMessage: data.statusMessage,
+                    deviceCount: data.deviceCount || 0
+                });
+                updateConversationPresence(data.userId, data.status);
+                addDebugLog('contact_presence_update', data);
+            });
+
+            socket.on('bulk_presence_response', (data) => {
+                if (data.presences) {
+                    data.presences.forEach(presence => {
+                        userPresences.set(presence.userId, {
+                            status: presence.status,
+                            lastSeen: presence.lastSeen,
+                            statusMessage: presence.statusMessage,
+                            deviceCount: presence.deviceCount || 0
+                        });
+                    });
+                    renderConversations();
+                }
+                addDebugLog('bulk_presence_response', data);
+            });
+
+            // ================= LASTMESSAGE EVENTS =================
+            socket.on('conversation_last_message_update', (data) => {
+                conversationLastMessages.set(data.conversationId, {
+                    lastMessage: data.lastMessage,
+                    unreadCount: data.unreadCount,
+                    lastActivity: data.lastMessage.timestamp
+                });
+                updateConversationInList(data);
+                addDebugLog('conversation_last_message_update', data);
+            });
+
+            socket.on('conversations_last_messages_response', (data) => {
+                addMessage('system', `✅ Nhận được lastMessages cho ${data.updates?.length || 0} conversations`, 'received');
+
+                if (data.updates && Array.isArray(data.updates)) {
+                    data.updates.forEach(update => {
+                        conversationLastMessages.set(update.conversationId, {
+                            lastMessage: update.lastMessage,
+                            unreadCount: update.unreadCount,
+                            lastActivity: update.lastActivity
+                        });
+
+                        addDebugLog('Updated lastMessage for conversation', {
+                            conversationId: update.conversationId,
+                            lastMessage: update.lastMessage?.content || 'No content',
+                            unreadCount: update.unreadCount
+                        });
+                    });
+
+                    // Re-render conversations to show lastMessages
+                    renderConversations();
+                    addMessage('system', `📝 Đã cập nhật lastMessages và re-render conversations`, 'received');
+                } else {
+                    addMessage('system', '⚠️ Response không có updates array', 'received');
+                }
+
+                addDebugLog('conversations_last_messages_response', data);
+            });
+
+
+
+            // Setup heartbeat
+            setupHeartbeat();
+
+            // Load conversations after connection - với proper sequencing
+            setTimeout(async () => {
+                try {
+                    await loadUserConversations();
+
+                    // Delay thêm để đảm bảo conversations đã được set
+                    setTimeout(() => {
+                        requestPresenceUpdates();
+                        requestLastMessages();
+                    }, 500);
+                } catch (error) {
+                    addMessage('system', `❌ Lỗi load conversations: ${error.message}`, 'received');
+                }
+            }, 1000);
         }
 
         function disconnect() {
@@ -1452,7 +1863,41 @@
             // Use senderName from the gateway response
             const senderName = data.senderName || data.senderId || 'Unknown User';
 
-            addMessage(senderName, content, 'received', null, filesMetadata);
+            // Always add to message cache if conversationId is provided
+            if (data.conversationId) {
+                addNewMessageToCache(data.conversationId, {
+                    messageId: data.messageId,
+                    content: content,
+                    messageType: data.messageType || 'text',
+                    senderId: data.senderId,
+                    senderName: senderName,
+                    timestamp: data.timestamp || Date.now(),
+                    filesInfo: filesMetadata
+                });
+
+                // Update lastMessage in conversationLastMessages Map
+                conversationLastMessages.set(data.conversationId, {
+                    lastMessage: {
+                        messageId: data.messageId,
+                        content: content,
+                        messageType: data.messageType || 'text',
+                        senderId: data.senderId,
+                        senderName: senderName,
+                        timestamp: data.timestamp || Date.now(),
+                        isRead: data.senderId === currentUser?.userId
+                    },
+                    unreadCount: data.unreadCount || 0,
+                    lastActivity: data.timestamp || Date.now()
+                });
+
+                // Update conversation list
+                renderConversations();
+            }
+
+            // Only display if it's for the current conversation
+            if (!data.conversationId || currentConversationId === data.conversationId) {
+                addMessage(senderName, content, 'received', null, filesMetadata);
+            }
         }
 
         function handleFileMessage(data) {
@@ -1461,7 +1906,26 @@
                 filesMetadata = [data.fileInfo];
             }
 
-            addMessage(data.senderName || 'User', data.content || 'Chia sẻ tệp', 'received', null, filesMetadata);
+            const senderName = data.senderName || 'User';
+            const content = data.content || 'Chia sẻ tệp';
+
+            // Always add to message cache if conversationId is provided
+            if (data.conversationId) {
+                addNewMessageToCache(data.conversationId, {
+                    messageId: data.messageId,
+                    content: content,
+                    messageType: 'file',
+                    senderId: data.senderId,
+                    senderName: senderName,
+                    timestamp: data.timestamp || Date.now(),
+                    fileInfo: data.fileInfo
+                });
+            }
+
+            // Only display if it's for the current conversation
+            if (!data.conversationId || currentConversationId === data.conversationId) {
+                addMessage(senderName, content, 'received', null, filesMetadata);
+            }
         }
 
         function handleBatchFileMessage(data) {
@@ -1470,7 +1934,26 @@
                 filesMetadata = data.filesInfo;
             }
 
-            addMessage(data.senderName || 'User', data.content || 'Chia sẻ nhiều tệp', 'received', null, filesMetadata);
+            const senderName = data.senderName || 'User';
+            const content = data.content || 'Chia sẻ nhiều tệp';
+
+            // Always add to message cache if conversationId is provided
+            if (data.conversationId) {
+                addNewMessageToCache(data.conversationId, {
+                    messageId: data.messageId,
+                    content: content,
+                    messageType: 'files',
+                    senderId: data.senderId,
+                    senderName: senderName,
+                    timestamp: data.timestamp || Date.now(),
+                    filesInfo: data.filesInfo
+                });
+            }
+
+            // Only display if it's for the current conversation
+            if (!data.conversationId || currentConversationId === data.conversationId) {
+                addMessage(senderName, content, 'received', null, filesMetadata);
+            }
         }
 
         function createFileAttachment(file) {
@@ -1850,6 +2333,707 @@
                 ]
             });
         });
+
+        // ================= CONVERSATIONS MANAGEMENT =================
+
+        async function loadUserConversations() {
+            try {
+                // Get token from input
+                const token = document.getElementById('accessToken').value.trim();
+                if (!token) {
+                    addMessage('system', '❌ Cần access token để tải conversations!', 'received');
+                    return;
+                }
+
+                // Show loading state
+                const conversationsList = document.getElementById('conversationsList');
+                if (conversationsList) {
+                    conversationsList.innerHTML = `
+                        <div style="padding: 20px; text-align: center; color: #666;">
+                            <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 10px; display: block;"></i>
+                            Đang tải danh sách cuộc trò chuyện...
+                        </div>
+                    `;
+                }
+
+                // Call API to get user conversations
+                const response = await fetch('http://localhost:3000/api/v1/conversations', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API call failed: ${response.status} ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                addDebugLog('Loaded conversations from API', result);
+
+                // Convert API response to internal format
+                conversations = result.conversations.map(conv => ({
+                    id: conv.id,
+                    name: conv.name || `Conversation ${conv.id}`,
+                    type: conv.type,
+                    avatar: conv.avatarUrl,
+                    participants: conv.participants || [],
+                    lastActivity: conv.lastMessage ? new Date(conv.lastMessage.createdAt).getTime() : new Date(conv.updatedAt || conv.createdAt).getTime(),
+                    unreadCount: conv.unreadCount || 0,
+                    isActive: conv.isActive !== false,
+                    isPinned: conv.status?.isPinned || false,
+                    isArchived: conv.status?.isArchived || false,
+                    lastMessage: conv?.lastMessage || "<no message>"
+                }));
+
+                // Update conversation last messages from API data
+                result.conversations.forEach(conv => {
+                    if (conv.lastMessage) {
+                        conversationLastMessages.set(conv.id, {
+                            lastMessage: {
+                                messageId: conv.lastMessage.id,
+                                content: conv.lastMessage.content,
+                                messageType: conv.lastMessage.messageType,
+                                senderId: conv.lastMessage.senderId,
+                                senderName: conv.lastMessage.senderId, // Will be updated with real names
+                                timestamp: new Date(conv.lastMessage.createdAt).getTime(),
+                                isRead: true // Assume read for now
+                            },
+                            unreadCount: conv.unreadCount || 0,
+                            lastActivity: new Date(conv.lastMessage.createdAt).getTime()
+                        });
+                    }
+                });
+
+                addMessage('system', `✅ Đã tải ${conversations.length} cuộc trò chuyện từ server`, 'received');
+                renderConversations();
+
+                // Request lastMessages sau khi conversations đã được load
+                setTimeout(() => {
+                    if (socket && socket.connected) {
+                        requestLastMessages();
+                    }
+                }, 300);
+
+                // Auto-select first conversation if available
+                if (conversations.length > 0 && !currentConversationId) {
+                    selectConversation(conversations[0].id, conversations[0].name);
+                }
+
+            } catch (error) {
+                console.error('Failed to load conversations:', error);
+                addMessage('system', `❌ Lỗi tải conversations: ${error.message}`, 'received');
+                addDebugLog('Load conversations error', error, 'error');
+
+                // Fallback to sample data if API fails
+                loadSampleConversations();
+            }
+        }
+
+        function loadSampleConversations() {
+            // Fallback sample conversations data
+            conversations = [
+                {
+                    id: 'test_conv_123',
+                    name: 'Test Conversation',
+                    type: 'group',
+                    avatar: null,
+                    participants: [
+                        { id: '6878adb69c4178957b3b9d1', name: 'User 1', phoneNumber: '+84901234567' },
+                        { id: '6878adb69c4178957b3b9d2', name: 'User 2', phoneNumber: '+84901234568' },
+                        { id: 'current_user', name: 'You', phoneNumber: currentUser?.phoneNumber || '+84999999999' }
+                    ],
+                    lastActivity: Date.now() - 300000, // 5 minutes ago
+                    unreadCount: 2,
+                    isActive: true
+                },
+                {
+                    id: 'conv_user_1',
+                    name: 'John Doe',
+                    type: 'direct',
+                    avatar: null,
+                    participants: [
+                        { id: '6878adb69c4178957b3b9d1', name: 'John Doe', phoneNumber: '+84901234567' },
+                        { id: 'current_user', name: 'You', phoneNumber: currentUser?.phoneNumber || '+84999999999' }
+                    ],
+                    lastActivity: Date.now() - 3600000, // 1 hour ago
+                    unreadCount: 0,
+                    isActive: true
+                },
+                {
+                    id: 'conv_user_2',
+                    name: 'Jane Smith',
+                    type: 'direct',
+                    avatar: null,
+                    participants: [
+                        { id: '6878adb69c4178957b3b9d2', name: 'Jane Smith', phoneNumber: '+84901234568' },
+                        { id: 'current_user', name: 'You', phoneNumber: currentUser?.phoneNumber || '+84999999999' }
+                    ],
+                    lastActivity: Date.now() - 7200000, // 2 hours ago
+                    unreadCount: 1,
+                    isActive: true
+                }
+            ];
+
+            addMessage('system', '📋 Sử dụng sample conversations (API không khả dụng)', 'received');
+            renderConversations();
+        }
+
+        function renderConversations() {
+            const conversationsList = document.getElementById('conversationsList');
+            if (!conversationsList) return;
+
+            // Debug: Log conversationLastMessages Map
+            addDebugLog('renderConversations - conversationLastMessages Map', {
+                size: conversationLastMessages.size,
+                entries: Array.from(conversationLastMessages.entries())
+            });
+
+            if (conversations.length === 0) {
+                conversationsList.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #666; font-style: italic;">
+                        <i class="fas fa-comments" style="font-size: 24px; margin-bottom: 10px; display: block;"></i>
+                        Chưa có cuộc trò chuyện nào<br>
+                        <small>Kết nối để tải danh sách cuộc trò chuyện</small>
+                    </div>
+                `;
+                return;
+            }
+
+            // Sort conversations by last activity
+            const sortedConversations = [...conversations].sort((a, b) => {
+                const aLastMessage = conversationLastMessages.get(a.id);
+                const bLastMessage = conversationLastMessages.get(b.id);
+
+                const aTime = aLastMessage?.lastActivity || a.lastActivity;
+                const bTime = bLastMessage?.lastActivity || b.lastActivity;
+
+                return bTime - aTime;
+            });
+
+            conversationsList.innerHTML = sortedConversations.map(conv => {
+                const lastMessageData = conversationLastMessages.get(conv.id);
+                const isActive = conv.id === currentConversationId;
+
+                // Get online status for direct conversations
+                let isOnline = false;
+                if (conv.type === 'direct') {
+                    const otherUser = conv.participants.find(p => p.id !== 'current_user');
+                    if (otherUser) {
+                        const presence = userPresences.get(otherUser.id);
+                        isOnline = presence?.status === 'online';
+                    }
+                }
+
+                // Generate avatar
+                const avatarContent = conv.avatar
+                    ? `<img src="${conv.avatar}" alt="${conv.name}">`
+                    : getAvatarPlaceholder(conv.name);
+
+                // Format last message với fallback từ API data trước
+                let lastMessageHtml = '';
+                if (lastMessageData?.lastMessage) {
+                    const msg = lastMessageData.lastMessage;
+                    const senderName = msg.senderName === (currentUser?.phoneNumber || currentUser?.userId) ? 'You' : msg.senderName;
+                    lastMessageHtml = `
+                        <div class="last-message-content">
+                            <span class="sender">${senderName}:</span> ${msg.content}
+                        </div>
+                    `;
+                } else if (conv.lastMessage && conv.lastMessage !== "<no message>") {
+                    // Fallback to conversation's lastMessage from API
+                    const msg = conv.lastMessage;
+                    const senderName = typeof msg === 'object' && msg.senderName ?
+                        (msg.senderName === (currentUser?.phoneNumber || currentUser?.userId) ? 'You' : msg.senderName) :
+                        'Unknown';
+                    const content = typeof msg === 'object' ? msg.content : msg;
+
+                    lastMessageHtml = `
+                        <div class="last-message-content">
+                            <span class="sender">${senderName}:</span> ${content}
+                        </div>
+                    `;
+                } else {
+                    lastMessageHtml = `
+                        <div class="last-message-content" style="font-style: italic; color: #999;">
+                            Chưa có tin nhắn
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="conversation-item ${isActive ? 'active' : ''}" 
+                         onclick="selectConversation('${conv.id}', '${conv.name}')">
+                        <div class="conversation-avatar">
+                            <div class="avatar">
+                                ${avatarContent}
+                            </div>
+                            <div class="online-indicator ${isOnline ? 'online' : ''}"></div>
+                        </div>
+                        
+                        <div class="conversation-content">
+                            <div class="conversation-header">
+                                <div class="conversation-name">${conv.name}</div>
+                                <div class="conversation-time">
+                                    ${formatRelativeTime(lastMessageData?.lastActivity || conv.lastActivity)}
+                                </div>
+                            </div>
+                            
+                            <div class="last-message">
+                                ${lastMessageHtml}
+                                <div class="conversation-badges">
+                                    ${lastMessageData?.unreadCount > 0 ? `
+                                        <div class="unread-count">${lastMessageData.unreadCount}</div>
+                                    ` : ''}
+                                    ${lastMessageData?.lastMessage ? `
+                                        <div class="read-status ${lastMessageData.lastMessage.isRead ? '' : 'unread'}">
+                                            ${lastMessageData.lastMessage.isRead ? '✓✓' : '✓'}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function getAvatarPlaceholder(name) {
+            const colors = [
+                '#667eea', '#764ba2', '#f093fb', '#f5576c',
+                '#4facfe', '#00f2fe', '#43e97b', '#38f9d7',
+                '#ffecd2', '#fcb69f', '#a8edea', '#fed6e3'
+            ];
+
+            const colorIndex = name.charCodeAt(0) % colors.length;
+            const initials = name.split(' ').map(n => n.charAt(0).toUpperCase()).join('').substring(0, 2);
+
+            return initials;
+        }
+
+        function formatRelativeTime(timestamp) {
+            if (!timestamp) return '';
+
+            const now = Date.now();
+            const diff = now - timestamp;
+            const minutes = Math.floor(diff / 60000);
+            const hours = Math.floor(minutes / 60);
+            const days = Math.floor(hours / 24);
+            const weeks = Math.floor(days / 7);
+
+            if (minutes < 1) return 'Vừa xong';
+            if (minutes < 60) return `${minutes} phút`;
+            if (hours < 24) return `${hours} giờ`;
+            if (days < 7) return `${days} ngày`;
+            if (weeks < 4) return `${weeks} tuần`;
+
+            return new Date(timestamp).toLocaleDateString('vi-VN');
+        }
+
+        async function selectConversation(conversationId, conversationName) {
+            currentConversationId = conversationId;
+
+            // Update the conversation ID input
+            document.getElementById('conversationId').value = conversationId;
+
+            // Update chat header
+            const chatHeaderTitle = document.querySelector('.chat-header h2');
+            if (chatHeaderTitle) {
+                chatHeaderTitle.textContent = `💬 ${conversationName}`;
+            }
+
+            // Re-render conversations to show active state
+            renderConversations();
+
+            // Load message history for this conversation
+            if (conversationMessagesLoaded.has(conversationId)) {
+                // Messages already loaded, render from cache
+                renderMessagesFromCache(conversationId);
+                addMessage('system', `📱 Đã chuyển sang cuộc trò chuyện: ${conversationName}`, 'received');
+            } else {
+                // Load messages from API
+                clearChat();
+                addMessage('system', `📱 Đang tải cuộc trò chuyện: ${conversationName}`, 'received');
+
+                const messages = await loadConversationMessages(conversationId);
+                if (messages.length === 0) {
+                    addMessage('system', `💬 Cuộc trò chuyện trống: ${conversationName}`, 'received');
+                } else {
+                    renderMessagesFromCache(conversationId);
+                }
+            }
+
+            // Join the conversation
+            if (socket && socket.connected) {
+                const joinData = { conversationIds: [conversationId] };
+                socket.emit('join_conversations', joinData);
+                addDebugLog('Switched to conversation', { conversationId, conversationName });
+            }
+        }
+
+        function updateConversationInList(data) {
+            // Update the conversation in the list
+            const conversation = conversations.find(c => c.id === data.conversationId);
+            if (conversation) {
+                conversation.lastActivity = data.lastMessage.timestamp;
+            }
+
+            // Re-render conversations
+            renderConversations();
+
+            // Show notification for new messages in other conversations
+            if (data.conversationId !== currentConversationId && data.unreadCount > 0) {
+                const conv = conversations.find(c => c.id === data.conversationId);
+                if (conv) {
+                    addMessage('system', `💬 Tin nhắn mới từ: ${conv.name}`, 'received');
+                }
+            }
+        }
+
+        function updateConversationPresence(userId, status) {
+            // Update online indicators for conversations involving this user
+            renderConversations();
+        }
+
+        function filterConversations() {
+            const searchInput = document.getElementById('conversationSearch');
+            const searchTerm = searchInput.value.toLowerCase();
+
+            const conversationItems = document.querySelectorAll('.conversation-item');
+            conversationItems.forEach(item => {
+                const conversationName = item.querySelector('.conversation-name').textContent.toLowerCase();
+                const lastMessage = item.querySelector('.last-message-content').textContent.toLowerCase();
+
+                const matches = conversationName.includes(searchTerm) || lastMessage.includes(searchTerm);
+                item.style.display = matches ? 'flex' : 'none';
+            });
+        }
+
+        function showNewConversationDialog() {
+            const conversationId = prompt('Nhập ID cuộc trò chuyện mới:');
+            if (conversationId && conversationId.trim()) {
+                const conversationName = prompt('Nhập tên cuộc trò chuyện:') || conversationId;
+
+                // Add new conversation
+                const newConversation = {
+                    id: conversationId.trim(),
+                    name: conversationName.trim(),
+                    type: 'direct',
+                    avatar: null,
+                    participants: [
+                        { id: 'other_user', name: 'Unknown User', phoneNumber: '+84000000000' },
+                        { id: 'current_user', name: 'You', phoneNumber: currentUser?.phoneNumber || '+84999999999' }
+                    ],
+                    lastActivity: Date.now()
+                };
+
+                conversations.unshift(newConversation);
+                renderConversations();
+                selectConversation(conversationId.trim(), conversationName.trim());
+            }
+        }
+
+        function requestPresenceUpdates() {
+            if (!socket || !socket.connected) return;
+
+            // Get all unique user IDs from conversations
+            const userIds = new Set();
+            conversations.forEach(conv => {
+                conv.participants.forEach(p => {
+                    if (p.id !== 'current_user') {
+                        userIds.add(p.id);
+                    }
+                });
+            });
+
+            if (userIds.size > 0) {
+                socket.emit('get_bulk_presence', { userIds: Array.from(userIds) });
+                addDebugLog('Requested presence updates', { userIds: Array.from(userIds) });
+            }
+        }
+
+        function requestLastMessages() {
+            if (!socket || !socket.connected) {
+                addMessage('system', '⚠️ Socket chưa kết nối - không thể request lastMessages', 'received');
+                return;
+            }
+
+            const conversationIds = conversations.map(c => c.id);
+            if (conversationIds.length > 0) {
+                addMessage('system', `🔄 Đang request lastMessages cho ${conversationIds.length} conversations...`, 'received');
+                socket.emit('get_conversations_last_messages', { conversationIds });
+                addDebugLog('Requested last messages', { conversationIds });
+            } else {
+                addMessage('system', '⚠️ Không có conversations để request lastMessages', 'received');
+            }
+        }
+
+        function testPresence() {
+            if (!socket || !socket.connected) {
+                addMessage('system', '⚠️ Socket chưa kết nối - không thể test presence', 'received');
+                return;
+            }
+
+            // Test 1: Request bulk presence
+            requestPresenceUpdates();
+            addMessage('system', '🔄 Test 1: Đã gửi bulk presence request', 'received');
+
+            // Test 2: Request specific user presence (sử dụng user khác trong conversation)
+            const testUserId = '687895cb7dd3bd7b1960762d'; // User ID khác
+            socket.emit('get_user_presence', { userId: testUserId });
+            addMessage('system', `🔄 Test 2: Đã request presence cho user ${testUserId}`, 'received');
+
+            // Test 3: Update own presence status
+            socket.emit('update_presence', {
+                status: 'online',
+                statusMessage: 'Testing presence system'
+            });
+            addMessage('system', '🔄 Test 3: Đã update presence status thành online', 'received');
+
+            addDebugLog('Presence test completed', {
+                bulkRequest: true,
+                specificUser: testUserId,
+                statusUpdate: 'online'
+            });
+        }
+
+        // ================= MESSAGE HISTORY MANAGEMENT =================
+
+        async function loadConversationMessages(conversationId, limit = 50) {
+            try {
+                // Get token from input
+                const token = document.getElementById('accessToken').value.trim();
+                if (!token) {
+                    addMessage('system', '❌ Cần access token để tải tin nhắn!', 'received');
+                    return [];
+                }
+
+                // Show loading state
+                const messagesContainer = document.getElementById('messagesContainer');
+                messagesContainer.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #666;">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 10px; display: block;"></i>
+                        Đang tải lịch sử tin nhắn...
+                    </div>
+                `;
+
+                // Call API to get conversation messages
+                const response = await fetch(`http://localhost:3000/api/v1/messages/conversation/${conversationId}?limit=${limit}&page=1`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API call failed: ${response.status} ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                addDebugLog('Loaded conversation messages from API', result);
+
+                // Convert API response to internal format
+                const messages = result.messages.map(msg => ({
+                    id: msg.id,
+                    content: msg.content,
+                    messageType: msg.messageType,
+                    senderId: msg.senderId,
+                    senderName: msg.senderId, // Will be updated with real names from participants
+                    conversationId: msg.conversationId,
+                    timestamp: new Date(msg.createdAt).getTime(),
+                    isRead: true, // Assume read for historical messages
+                    filesMetadata: msg.attachments || []
+                }));
+
+                // Cache the messages
+                conversationMessages.set(conversationId, messages);
+                conversationMessagesLoaded.set(conversationId, true);
+
+                addDebugLog('Cached messages for conversation', { conversationId, messageCount: messages.length });
+                return messages;
+
+            } catch (error) {
+                console.error('Failed to load conversation messages:', error);
+                addMessage('system', `❌ Lỗi tải tin nhắn: ${error.message}`, 'received');
+                addDebugLog('Load messages error', error, 'error');
+
+                // Return empty array on error
+                return [];
+            }
+        }
+
+        function renderMessagesFromCache(conversationId) {
+            const messages = conversationMessages.get(conversationId) || [];
+
+            // Clear current messages
+            const messagesContainer = document.getElementById('messagesContainer');
+            messagesContainer.innerHTML = '';
+
+            if (messages.length === 0) {
+                messagesContainer.innerHTML = `
+                    <div class="message received">
+                        <div class="message-bubble">
+                            <p>💬 Chưa có tin nhắn nào trong cuộc trò chuyện này</p>
+                        </div>
+                        <div class="message-info">System • vừa xong</div>
+                    </div>
+                `;
+                return;
+            }
+
+            // Sort messages by timestamp (oldest first)
+            messages.sort((a, b) => a.timestamp - b.timestamp);
+
+            // Render each message
+            messages.forEach(msg => {
+                const messageType = msg.senderId === currentUser?.userId ? 'sent' : 'received';
+                const senderName = getSenderDisplayName(msg.senderId, conversationId);
+
+                addMessageToDOM(senderName, msg.content, messageType, msg.id, msg.filesMetadata, new Date(msg.timestamp));
+            });
+
+            addMessage('system', `📜 Đã tải ${messages.length} tin nhắn từ lịch sử`, 'received');
+        }
+
+        function addMessageToDOM(sender, content, type, messageId = null, filesMetadata = [], timestamp = new Date()) {
+            const messagesContainer = document.getElementById('messagesContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            if (messageId) messageDiv.setAttribute('data-message-id', messageId);
+
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.className = 'message-bubble';
+
+            let messageHTML = `<p>${content || 'Tin nhắn trống'}</p>`;
+
+            // Add file attachments
+            if (filesMetadata && filesMetadata.length > 0) {
+                if (filesMetadata.length === 1) {
+                    const file = filesMetadata[0];
+                    messageHTML += createFileAttachment(file);
+                } else {
+                    messageHTML += createBatchFileAttachment(filesMetadata);
+                }
+            }
+
+            bubbleDiv.innerHTML = messageHTML;
+            messageDiv.appendChild(bubbleDiv);
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'message-info';
+            const senderDisplay = sender === 'user' && currentUser ?
+                (currentUser.phoneNumber || currentUser.userId) : sender;
+            infoDiv.textContent = `${senderDisplay} • ${formatTime(timestamp)}`;
+            messageDiv.appendChild(infoDiv);
+
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function getSenderDisplayName(senderId, conversationId) {
+            // Find the conversation to get participant info
+            const conversation = conversations.find(c => c.id === conversationId);
+            if (!conversation) return senderId;
+
+            // Find the participant
+            const participant = conversation.participants.find(p => p.id === senderId);
+            if (participant) {
+                return participant.name || participant.phoneNumber || senderId;
+            }
+
+            // If current user
+            if (senderId === currentUser?.userId) {
+                return currentUser.phoneNumber || currentUser.userId;
+            }
+
+            return senderId;
+        }
+
+        function addNewMessageToCache(conversationId, messageData) {
+            if (!conversationMessages.has(conversationId)) {
+                conversationMessages.set(conversationId, []);
+            }
+
+            const messages = conversationMessages.get(conversationId);
+            const newMessage = {
+                id: messageData.messageId || `temp_${Date.now()}`,
+                content: messageData.content,
+                messageType: messageData.messageType || 'text',
+                senderId: messageData.senderId,
+                senderName: messageData.senderName || messageData.senderId,
+                conversationId: conversationId,
+                timestamp: messageData.timestamp || Date.now(),
+                isRead: messageData.senderId === currentUser?.userId,
+                filesMetadata: messageData.filesInfo || messageData.fileInfo ? [messageData.fileInfo] : []
+            };
+
+            messages.push(newMessage);
+            addDebugLog('Added new message to cache', { conversationId, messageId: newMessage.id });
+        }
+
+        function clearMessageCache(conversationId = null) {
+            if (conversationId) {
+                // Clear cache for specific conversation
+                conversationMessages.delete(conversationId);
+                conversationMessagesLoaded.delete(conversationId);
+                addDebugLog('Cleared message cache for conversation', { conversationId });
+            } else {
+                // Clear all message cache
+                conversationMessages.clear();
+                conversationMessagesLoaded.clear();
+                addDebugLog('Cleared all message cache');
+            }
+        }
+
+        function refreshConversationMessages(conversationId) {
+            // Force reload messages for a conversation
+            clearMessageCache(conversationId);
+            if (currentConversationId === conversationId) {
+                selectConversation(conversationId, getCurrentConversationName(conversationId));
+            }
+        }
+
+        function getCurrentConversationName(conversationId) {
+            const conversation = conversations.find(c => c.id === conversationId);
+            return conversation ? conversation.name : 'Unknown';
+        }
+
+        function refreshCurrentConversation() {
+            if (!currentConversationId) {
+                addMessage('system', '⚠️ Chưa chọn cuộc trò chuyện nào để tải lại!', 'received');
+                return;
+            }
+
+            const conversationName = getCurrentConversationName(currentConversationId);
+            addMessage('system', `🔄 Đang tải lại tin nhắn cho: ${conversationName}`, 'received');
+
+            refreshConversationMessages(currentConversationId);
+        }
+
+        function manualRequestLastMessages() {
+            addMessage('system', '🔄 Manual request lastMessages...', 'received');
+            requestLastMessages();
+        } function setupHeartbeat() {
+            if (!socket || !socket.connected) return;
+
+            // Send heartbeat every 30 seconds
+            const heartbeatInterval = setInterval(() => {
+                if (socket && socket.connected) {
+                    socket.emit('user_heartbeat', {
+                        timestamp: Date.now(),
+                        deviceInfo: {
+                            type: 'web',
+                            os: navigator.platform,
+                            browser: navigator.userAgent.split(' ').pop()
+                        }
+                    });
+                } else {
+                    clearInterval(heartbeatInterval);
+                }
+            }, 30000);
+        }
     </script>
 </body>
 

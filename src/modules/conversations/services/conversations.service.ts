@@ -314,6 +314,7 @@ export class ConversationsService implements IConversationsService {
       // 3. Get conversations with pagination
       const result = await this.conversationRepository.findUserConversations(userId, query);
       // 4. Format conversations for response (using ConversationListItem structure)
+
       const conversations = result.conversations.map(conv => ({
         id: conv.id,
         type: conv.type,

@@ -2367,6 +2367,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 });
             }
 
+            this.logger.debug(`Fetched lastMessages user ${userId}`, lastMessages);
+
             // Send response to client
             client.emit('conversations_last_messages_response', {
                 updates,

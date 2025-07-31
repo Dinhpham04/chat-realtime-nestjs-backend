@@ -34,7 +34,7 @@ export class LastMessageService implements ILastMessageService {
     private readonly READ_STATUS_PREFIX = 'lastmsg:read:';
 
     // Cache TTL settings
-    private readonly CACHE_TTL = 3600; // 1 hour
+    private readonly CACHE_TTL = 3600 * 24 * 7; // 1 hour
     private readonly READ_STATUS_TTL = 7200; // 2 hours
 
     constructor(
