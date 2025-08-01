@@ -24,6 +24,7 @@ import {
     BulkPresenceResponse,
     PresenceUpdateEvent
 } from '../types/presence.types';
+import { ConversationsService } from '../../modules/conversations/services/conversations.service';
 
 @Injectable()
 export class PresenceService {
@@ -42,6 +43,7 @@ export class PresenceService {
     constructor(
         @Inject('IOREDIS_CLIENT') private readonly redis: Redis,
         private readonly eventEmitter: EventEmitter2,
+        private readonly conversationsService: ConversationsService,
     ) { }
 
     // ================= CORE PRESENCE OPERATIONS =================
@@ -263,12 +265,31 @@ export class PresenceService {
 
     /**
      * Get user's contact list for presence notifications
-     * TODO: Integrate with friends/contacts service
+     * Gets contacts from conversations (more comprehensive than friends list)
+     * Uses Redis cache for performance
      */
     async getUserContacts(userId: string): Promise<string[]> {
         try {
-            const contacts = await this.redis.smembers(`${this.USER_CONTACTS_PREFIX}${userId}`);
-            return contacts;
+            // Try cache first
+            const cacheKey = `${this.USER_CONTACTS_PREFIX}${userId}`;
+            const cachedContacts = await this.redis.smembers(cacheKey);
+
+            if (cachedContacts.length > 0) {
+                this.logger.debug(`Using cached contacts for user ${userId}: ${cachedContacts.length} contacts`);
+                return cachedContacts;
+            }
+
+            // Get contacts from conversations
+            const contactIds = await this.conversationsService.getUserContacts(userId);
+
+            // Cache the result for 5 minutes
+            if (contactIds.length > 0) {
+                await this.redis.sadd(cacheKey, ...contactIds);
+                await this.redis.expire(cacheKey, 300); // 5 minutes cache
+            }
+
+            this.logger.log(`Found ${contactIds.length} contacts for user ${userId} from conversations`);
+            return contactIds;
         } catch (error) {
             this.logger.error(`Failed to get contacts for user ${userId}:`, error);
             return [];

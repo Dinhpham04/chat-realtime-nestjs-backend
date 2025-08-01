@@ -1,3 +1,4 @@
+import { Public } from 'src/shared';
 import {
     Controller,
     Post,
@@ -48,13 +49,13 @@ import {
 } from '../dto/file.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { JwtUser } from '../../auth/interfaces/jwt-payload.interface';
-import { Public } from '../../../shared/decorators/public.decorator';
 import { FILE_CONSTANTS } from '../constants/file.constants';
 import { RedisDownloadTokenService } from '../../../redis/services/redis-download-token.service';
 
 interface AuthenticatedRequest extends ExpressRequest {
     user: JwtUser; // userId, phoneNumber, deviceId, roles
-}/**
+}
+/**
  * Files Controller - RESTful API for file operations
  * 
  * 🎯 Purpose: Handle HTTP requests for file upload, download, and management

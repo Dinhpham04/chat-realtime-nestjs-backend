@@ -898,6 +898,25 @@ export class ConversationsService implements IConversationsService {
   }
 
   /**
+   * Get user contacts from conversations for presence notifications
+   * Returns list of user IDs that the user has conversations with
+   */
+  async getUserContacts(userId: string): Promise<string[]> {
+    try {
+      this.logger.debug(`Getting contacts from conversations for user: ${userId}`);
+
+      // Use repository method to get user contacts directly
+      const contactIds = await this.conversationRepository.getUserContactsFromConversations(userId);
+
+      this.logger.log(`Found ${contactIds.length} contacts for user ${userId} from conversations`);
+      return contactIds;
+    } catch (error) {
+      this.logger.error(`Failed to get contacts for user ${userId}:`, error);
+      return [];
+    }
+  }
+
+  /**
    * Check if user is member of conversation
    * Used by Messages module for authorization
    */

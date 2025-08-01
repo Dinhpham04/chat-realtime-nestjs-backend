@@ -333,6 +333,77 @@ export class FilesService {
     }
 
     /**
+     * Gets message attachments in DTO format for API responses
+     * @param messageId Message identifier
+     * @param userId User requesting the files
+     * @returns Array of attachment DTOs
+     */
+    async getMessageAttachments(messageId: string, userId?: string): Promise<Array<{
+        fileId: string;
+        fileName: string;
+        mimeType: string;
+        fileSize: number;
+        downloadUrl?: string;
+        thumbnailUrl?: string;
+        caption?: string;
+        attachmentOrder?: number;
+    }>> {
+        const attachments = await this.attachmentRepository.findByMessageId(messageId);
+
+        const attachmentDtos: Array<{
+            fileId: string;
+            fileName: string;
+            mimeType: string;
+            fileSize: number;
+            downloadUrl?: string;
+            thumbnailUrl?: string;
+            caption?: string;
+            attachmentOrder?: number;
+        }> = [];
+
+        for (const attachment of attachments) {
+            try {
+                const file = await this.getFile(attachment.fileId, userId);
+
+                // Generate download URL
+                const downloadUrl = await this.generateDownloadUrl(
+                    attachment.fileId,
+                    userId || '',
+                    { expiresIn: 24 * 60 * 60 }
+                );
+
+                // Generate thumbnail URL if available
+                let thumbnailUrl: string | undefined;
+                if (file.thumbnailPath) {
+                    thumbnailUrl = await this.generateDownloadUrl(
+                        attachment.fileId,
+                        userId || '',
+                        { expiresIn: 24 * 60 * 60 }
+                    );
+                    thumbnailUrl = `${thumbnailUrl}&thumbnail=true`;
+                }
+
+                attachmentDtos.push({
+                    fileId: attachment.fileId,
+                    fileName: file.fileName,
+                    mimeType: file.mimeType,
+                    fileSize: file.fileSize,
+                    downloadUrl,
+                    thumbnailUrl,
+                    caption: attachment.caption,
+                    attachmentOrder: attachment.attachmentOrder,
+                });
+            } catch (error) {
+                // Skip files user doesn't have access to
+                this.logger.warn(`User ${userId} cannot access file ${attachment.fileId}`);
+                continue;
+            }
+        }
+
+        return attachmentDtos;
+    }
+
+    /**
      * Soft deletes a file
      * @param fileId File identifier
      * @param userId User performing the deletion

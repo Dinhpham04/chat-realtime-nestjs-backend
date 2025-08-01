@@ -1240,7 +1240,7 @@
             });
 
             // ================= PRESENCE EVENTS =================
-            socket.on('user_presence_response', (data) => {
+            socket.on('get_user_presence', (data) => {
                 userPresences.set(data.userId, {
                     status: data.status,
                     lastSeen: data.lastSeen,

@@ -8,6 +8,7 @@ import { Message, MessageSchema } from './schemas/message.schema';
 import { AuthModule } from '../auth/auth.module';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { UsersModule } from '../users';
+import { FilesModule } from '../files/files.module';
 
 /**
  * Messages Module
@@ -34,6 +35,7 @@ import { UsersModule } from '../users';
         EventEmitterModule.forRoot(), // Fix EventEmitter injection
         AuthModule, // Import Auth module for authentication
         UsersModule,
+        FilesModule, // Import Files module for attachments
         forwardRef(() => ConversationsModule) // Import Conversations module for membership validation
     ],
     controllers: [MessagesController],

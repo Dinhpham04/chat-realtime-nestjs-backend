@@ -12,7 +12,7 @@
  * - Search and filtering capabilities
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { IConversationRepository } from './interfaces/conversation-repository.interface';
@@ -1340,6 +1340,74 @@ export class ConversationRepository implements IConversationRepository {
     } catch (error) {
       this.logger.error(`Failed to count admins: ${error.message}`, error.stack);
       throw error;
+    }
+  }
+
+  /**
+   * Get user contacts from conversations for presence notifications
+   * Returns unique list of user IDs that the user has conversations with
+   */
+  async getUserContactsFromConversations(userId: string): Promise<string[]> {
+    try {
+      if (!Types.ObjectId.isValid(userId)) {
+        throw new BadRequestException('Invalid user ID');
+      }
+
+      const userObjectId = new Types.ObjectId(userId);
+
+      // Use aggregation to get unique participant IDs from all user's conversations
+      const pipeline = [
+        // Find all conversations where user is a participant
+        {
+          $match: {
+            userId: userObjectId,
+            leftAt: null // Active participants only
+          }
+        },
+        // Lookup the conversation to get all participants
+        {
+          $lookup: {
+            from: 'conversation_participants',
+            localField: 'conversationId',
+            foreignField: 'conversationId',
+            as: 'allParticipants'
+          }
+        },
+        // Unwind all participants
+        {
+          $unwind: '$allParticipants'
+        },
+        // Filter out the current user and inactive participants
+        {
+          $match: {
+            'allParticipants.userId': { $ne: userObjectId },
+            'allParticipants.leftAt': null
+          }
+        },
+        // Group to get unique contact IDs
+        {
+          $group: {
+            _id: '$allParticipants.userId'
+          }
+        },
+        // Project to clean format
+        {
+          $project: {
+            _id: 0,
+            userId: '$_id'
+          }
+        }
+      ];
+
+      const results = await this.participantModel.aggregate(pipeline);
+      const contactIds = results.map(result => result.userId.toString());
+
+      this.logger.debug(`Found ${contactIds.length} contacts for user ${userId} from conversations`);
+      return contactIds;
+
+    } catch (error) {
+      this.logger.error(`Failed to get user contacts from conversations: ${error.message}`, error.stack);
+      return [];
     }
   }
 }

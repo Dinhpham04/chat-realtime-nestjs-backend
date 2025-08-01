@@ -115,6 +115,11 @@ export interface IConversationRepository {
    */
   countAdmins(conversationId: string): Promise<number>;
 
+  /**
+   * Get user contacts from conversations for presence notifications
+   */
+  getUserContactsFromConversations(userId: string): Promise<string[]>;
+
   // =============== CONVERSATION UPDATES ===============
 
   /**

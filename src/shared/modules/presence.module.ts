@@ -1,27 +1,5 @@
 /**
- * Presimport { PresenceService } from '../services/presence.service';
-import { PresenceCleanupService } from '../services/presence-cleanup.service';
-import { LastMessageService } from '../services/last-message.service';
-import { RedisModule } from '../../redis/redis.module';
-
-@Module({
-    imports: [
-        RedisModule,
-        EventEmitterModule.forRoot(), // For presence event broadcasting
-        ScheduleModule.forRoot(), // For cleanup jobs
-    ],
-    providers: [
-        PresenceService,
-        PresenceCleanupService,
-        LastMessageService,
-    ],
-    exports: [
-        PresenceService,
-        PresenceCleanupService,
-        LastMessageService,
-    ],
-})
-export class PresenceModule {} Status System
+ * Presence Status System
  * 
  * 🎯 Purpose: Module for real-time user presence tracking
  * 🔴 Redis Integration: Scalable presence storage
@@ -34,21 +12,26 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PresenceService } from '../services/presence.service';
 import { PresenceCleanupService } from '../services/presence-cleanup.service';
+import { LastMessageService } from '../services/last-message.service';
 import { RedisModule } from '../../redis/redis.module';
+import { ConversationsModule } from '../../modules/conversations/conversations.module';
 
 @Module({
     imports: [
         RedisModule,
         EventEmitterModule.forRoot(), // For presence event broadcasting
         ScheduleModule.forRoot(), // For cleanup jobs
+        forwardRef(() => ConversationsModule), // For getting user contacts
     ],
     providers: [
         PresenceService,
         PresenceCleanupService,
+        LastMessageService,
     ],
     exports: [
         PresenceService,
         PresenceCleanupService,
+        LastMessageService,
     ],
 })
 export class PresenceModule { }

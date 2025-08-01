@@ -798,6 +798,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // Send message via Messages Service
             const message = await this.messagesService.sendMessage(createMessageDto, userContext);
 
+            // Link file to message in database for attachment history
+            try {
+                await this.filesService.linkFileToMessage(
+                    data.fileId,
+                    message.id,
+                    userId,
+                    data.message // Use message as caption if provided
+                );
+                this.logger.log(`File ${data.fileId} linked to message ${message.id}`);
+            } catch (linkError) {
+                this.logger.warn(`Failed to link file to message: ${linkError.message}`);
+            }
+
             // Broadcast file message to conversation
             const senderName = await this.getUserDisplayName(userId);
             const messageData = {
@@ -834,6 +847,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             });
 
             this.logger.log(`File shared: ${data.fileId} by ${userId} to conversation ${data.conversationId}`);
+
+            // Auto-mark as delivered for online participants (excluding sender)
+            try {
+                const participants = (await this.getConversationParticipants(data.conversationId, userId)).filter(i => i !== userId);
+                this.logger.debug(`Participants for delivery update:`, participants);
+                await this.updateDeliveryStatusForOnlineUsers(message.id, participants);
+
+                // Queue message for offline participants
+                await this.queueMessageForOfflineParticipants(message, participants, userId);
+
+                // Update lastMessage for conversation list real-time updates
+                await this.updateAndBroadcastLastMessage(message, data.conversationId, userId);
+
+            } catch (deliveryError) {
+                this.logger.warn(`Failed to update delivery status for message ${message.id}:`, deliveryError);
+            }
 
         } catch (error) {
             this.logger.error(`Share file error for socket ${client.id}:`, error);
@@ -901,6 +930,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // Send message via Messages Service
             const message = await this.messagesService.sendMessage(createMessageDto, userContext);
 
+            // Link file to message in database for attachment history
+            try {
+                await this.filesService.linkFileToMessage(
+                    data.fileId,
+                    message.id,
+                    userId,
+                    data.message // Use message as caption if provided
+                );
+                this.logger.log(`File ${data.fileId} linked to message ${message.id}`);
+            } catch (linkError) {
+                this.logger.warn(`Failed to link file to message: ${linkError.message}`);
+            }
+
             // Broadcast file message to conversation (using provided metadata)
             const senderName = await this.getUserDisplayName(userId);
             const messageData = {
@@ -934,6 +976,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             });
 
             this.logger.log(`Quick file shared: ${data.fileId} by ${userId} to conversation ${data.conversationId}`);
+
+            // Auto-mark as delivered for online participants (excluding sender)
+            try {
+                const participants = (await this.getConversationParticipants(data.conversationId, userId)).filter(i => i !== userId);
+                this.logger.debug(`Participants for delivery update:`, participants);
+                await this.updateDeliveryStatusForOnlineUsers(message.id, participants);
+
+                // Queue message for offline participants
+                await this.queueMessageForOfflineParticipants(message, participants, userId);
+
+                // Update lastMessage for conversation list real-time updates
+                await this.updateAndBroadcastLastMessage(message, data.conversationId, userId);
+
+            } catch (deliveryError) {
+                this.logger.warn(`Failed to update delivery status for message ${message.id}:`, deliveryError);
+            }
 
         } catch (error) {
             this.logger.error(`Quick share file error for socket ${client.id}:`, error);
@@ -1073,6 +1131,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // Send message via Messages Service
             const message = await this.messagesService.sendMessage(createMessageDto, userContext);
 
+            // Link each file to message in database for attachment history
+            try {
+                for (const fileId of data.fileIds) {
+                    await this.filesService.linkFileToMessage(
+                        fileId,
+                        message.id,
+                        userId,
+                        data.message // Use message as caption if provided
+                    );
+                }
+                this.logger.log(`${data.fileIds.length} files linked to message ${message.id}`);
+            } catch (linkError) {
+                this.logger.warn(`Failed to link files to message: ${linkError.message}`);
+            }
+
             // Broadcast batch file message to conversation
             const senderName = await this.getUserDisplayName(userId);
             const messageData = {
@@ -1116,6 +1189,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             });
 
             this.logger.log(`Batch files shared: ${data.fileIds.length} files by ${userId} to conversation ${data.conversationId}`);
+
+            // Auto-mark as delivered for online participants (excluding sender)
+            try {
+                const participants = (await this.getConversationParticipants(data.conversationId, userId)).filter(i => i !== userId);
+                this.logger.debug(`Participants for delivery update:`, participants);
+                await this.updateDeliveryStatusForOnlineUsers(message.id, participants);
+
+                // Queue message for offline participants
+                await this.queueMessageForOfflineParticipants(message, participants, userId);
+
+                // Update lastMessage for conversation list real-time updates
+                await this.updateAndBroadcastLastMessage(message, data.conversationId, userId);
+
+            } catch (deliveryError) {
+                this.logger.warn(`Failed to update delivery status for message ${message.id}:`, deliveryError);
+            }
 
         } catch (error) {
             this.logger.error(`Batch share files error for socket ${client.id}:`, error);
@@ -2079,7 +2168,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private validateFileMetadata(fileMetadata: any): boolean {
         if (!fileMetadata) return false;
 
-        const requiredFields = ['fileId', 'fileName', 'fileSize', 'mimeType', 'downloadUrl'];
+        const requiredFields = ['fileName', 'fileSize', 'mimeType', 'downloadUrl'];
         return requiredFields.every(field => fileMetadata[field] !== undefined);
     }
 
@@ -2250,6 +2339,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // Get user's contacts (friends who should see presence updates)
             const contacts = await this.presenceService.getUserContacts(userId);
 
+            this.logger.debug(`Notifying contacts about ${userId}'s presence change to ${status}`, contacts);
+
             if (contacts.length === 0) {
                 return;
             }
@@ -2257,6 +2348,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // Get full presence info
             const presence = await this.presenceService.getUserPresence(userId);
 
+            this.logger.debug(`Presence for user ${userId}:`, presence);
             if (!presence) {
                 return;
             }
@@ -2269,6 +2361,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 statusMessage: presence.statusMessage,
                 timestamp: Date.now()
             };
+
+            this.logger.debug(`contact_presence_update`, presenceNotification);
 
             // Broadcast to each contact's presence room
             for (const contactId of contacts) {

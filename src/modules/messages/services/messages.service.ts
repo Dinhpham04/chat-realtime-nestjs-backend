@@ -35,6 +35,7 @@ import { IMessageRepository } from '../interfaces/message-repository.interface';
 import { MessageStatus, MessageType } from '../types';
 import { ConversationsService } from '../../conversations/services/conversations.service';
 import { UsersService } from 'src/modules/users';
+import { FilesService } from '../../files/services/files.service';
 
 @Injectable()
 export class MessagesService implements IExtendedMessageService {
@@ -45,7 +46,8 @@ export class MessagesService implements IExtendedMessageService {
         private readonly messageRepository: IMessageRepository,
         private readonly eventEmitter: EventEmitter2,
         private readonly conversationsService: ConversationsService,
-        private readonly usersService: UsersService
+        private readonly usersService: UsersService,
+        private readonly filesService: FilesService
     ) { }
 
     /**
@@ -262,19 +264,35 @@ export class MessagesService implements IExtendedMessageService {
 
 
         // Transform to response DTOs
-        const messages: MessageResponseDto[] = result.data.map((message, i) => ({
-            id: message._id.toString(),
-            conversationId: message.conversationId.toString(),
-            senderId: message.senderId.toString(),
-            sender: senders[i],
-            type: message.messageType,
-            content: message.content,
-            attachments: [], // Will be handled by attachment module
-            mentions: [],
-            createdAt: message.createdAt,
-            updatedAt: message.updatedAt,
-            status: MessageStatus.DELIVERED // Default status since not stored in schema yet
-        }));
+        const messages: MessageResponseDto[] = await Promise.all(
+            result.data.map(async (message, i) => {
+                // Get file attachments for this message in DTO format
+                let attachments: any[] = [];
+                try {
+                    attachments = await this.filesService.getMessageAttachments(
+                        message._id.toString(),
+                        userContext.userId
+                    );
+                } catch (error) {
+                    this.logger.warn(`Failed to load attachments for message ${message._id}: ${error.message}`);
+                    attachments = [];
+                }
+
+                return {
+                    id: message._id.toString(),
+                    conversationId: message.conversationId.toString(),
+                    senderId: message.senderId.toString(),
+                    sender: senders[i],
+                    type: message.messageType,
+                    content: message.content,
+                    attachments,
+                    mentions: [],
+                    createdAt: message.createdAt,
+                    updatedAt: message.updatedAt,
+                    status: MessageStatus.DELIVERED // Default status since not stored in schema yet
+                };
+            })
+        );
 
         return {
             messages,
@@ -708,6 +726,18 @@ export class MessagesService implements IExtendedMessageService {
             // Transform to response DTOs
             const messages = await Promise.all(
                 result.data.map(async (message) => {
+                    // Get file attachments for this message in DTO format
+                    let attachments: any[] = [];
+                    try {
+                        attachments = await this.filesService.getMessageAttachments(
+                            message._id.toString(),
+                            userContext?.userId || ''
+                        );
+                    } catch (error) {
+                        this.logger.warn(`Failed to load attachments for message ${message._id}: ${error.message}`);
+                        attachments = [];
+                    }
+
                     return {
                         id: message._id.toString(),
                         conversationId: message.conversationId.toString(),
@@ -715,7 +745,7 @@ export class MessagesService implements IExtendedMessageService {
                         content: message.content || '',
                         type: message.messageType,
                         status: MessageStatus.SENT, // Default status
-                        attachments: [], // TODO: Implement attachments
+                        attachments,
                         mentions: [], // TODO: Implement mentions
                         replyTo: message.replyTo ? {
                             messageId: message.replyTo.toString(),
@@ -782,28 +812,42 @@ export class MessagesService implements IExtendedMessageService {
             );
 
             // Transform to response DTOs
-            const transformMessage = (message: any): MessageResponseDto => ({
-                id: message._id.toString(),
-                conversationId: message.conversationId.toString(),
-                senderId: message.senderId.toString(),
-                content: message.content || '',
-                type: message.messageType,
-                status: MessageStatus.SENT,
-                attachments: [],
-                mentions: [],
-                replyTo: message.replyTo ? {
-                    messageId: message.replyTo.toString(),
-                    content: '',
-                    senderId: '',
-                    senderName: ''
-                } : undefined,
-                createdAt: message.createdAt,
-                updatedAt: message.updatedAt,
-                delivery: undefined
-            });
+            const transformMessage = async (message: any): Promise<MessageResponseDto> => {
+                // Get file attachments for this message in DTO format
+                let attachments: any[] = [];
+                try {
+                    attachments = await this.filesService.getMessageAttachments(
+                        message._id.toString(),
+                        userContext?.userId || ''
+                    );
+                } catch (error) {
+                    this.logger.warn(`Failed to load attachments for message ${message._id}: ${error.message}`);
+                    attachments = [];
+                }
 
-            const beforeMessages = messagesBefore.map(transformMessage);
-            const afterMessages = messagesAfter.map(transformMessage);
+                return {
+                    id: message._id.toString(),
+                    conversationId: message.conversationId.toString(),
+                    senderId: message.senderId.toString(),
+                    content: message.content || '',
+                    type: message.messageType,
+                    status: MessageStatus.SENT,
+                    attachments,
+                    mentions: [],
+                    replyTo: message.replyTo ? {
+                        messageId: message.replyTo.toString(),
+                        content: '',
+                        senderId: '',
+                        senderName: ''
+                    } : undefined,
+                    createdAt: message.createdAt,
+                    updatedAt: message.updatedAt,
+                    delivery: undefined
+                };
+            };
+
+            const beforeMessages = await Promise.all(messagesBefore.map(transformMessage));
+            const afterMessages = await Promise.all(messagesAfter.map(transformMessage));
 
             // Combine all messages in chronological order
             const allMessages = [
