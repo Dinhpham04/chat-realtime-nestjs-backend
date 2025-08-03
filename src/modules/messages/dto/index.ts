@@ -21,7 +21,8 @@ export enum MessageType {
     LOCATION = 'location',
     CONTACT = 'contact',
     STICKER = 'sticker',
-    SYSTEM = 'system'
+    SYSTEM = 'system',
+    // DOCUMENT = 'document',
 }
 
 export enum MessageStatus {

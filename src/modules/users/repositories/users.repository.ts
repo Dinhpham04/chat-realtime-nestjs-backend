@@ -319,20 +319,46 @@ export class UsersRepository implements IUsersRepository {
       throw error;
     }
   }
-  updateOnlineStatus(id: string, isOnline: boolean): Promise<UserDocument | null> {
-    throw new Error("Method not implemented.");
+  async updateOnlineStatus(id: string, isOnline: boolean): Promise<UserDocument | null> {
+    try {
+      if (!Types.ObjectId.isValid(id)) {
+        return null;
+      }
+
+      const activityStatus = isOnline ? 'online' : 'offline';
+      const updateData = {
+        activityStatus,
+        lastSeen: isOnline ? undefined : new Date(), // Only update lastSeen when going offline
+        updatedAt: new Date()
+      };
+
+      const updatedUser = await this.userModel
+        .findByIdAndUpdate(id, updateData, { new: true, runValidators: true })
+        .exec();
+
+      if (updatedUser) {
+        this.logger.log(`User ${id} online status updated to: ${activityStatus}`);
+      }
+
+      return updatedUser;
+    } catch (error) {
+      this.logger.error(`Failed to update online status for user ${id}: ${error.message}`);
+      throw error;
+    }
   }
+
+  // Not needed for Profile Management
   updateRefreshToken(id: string, refreshToken: string | null): Promise<UserDocument | null> {
-    throw new Error("Method not implemented.");
+    throw new Error("Method not implemented - handled by Auth module.");
   }
   blockUser(userId: string, blockedUserId: string): Promise<boolean> {
-    throw new Error("Method not implemented.");
+    throw new Error("Method not implemented - handled by Friends module.");
   }
   unblockUser(userId: string, blockedUserId: string): Promise<boolean> {
-    throw new Error("Method not implemented.");
+    throw new Error("Method not implemented - handled by Friends module.");
   }
   getCountByStatus(): Promise<{ [key: string]: number; }> {
-    throw new Error("Method not implemented.");
+    throw new Error("Method not implemented - not needed for Profile Management.");
   }
 
 }

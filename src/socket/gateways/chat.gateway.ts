@@ -38,6 +38,10 @@ const DEFAULT_MESSAGE_TIMEOUT = 30000; // 30 seconds
 const MAX_RETRY_ATTEMPTS = 3;
 const DELIVERY_BATCH_SIZE = 50;
 
+// Typing indicator constants
+const TYPING_TIMEOUT = 3000; // 3 seconds - auto clear typing if no activity
+const TYPING_DEBOUNCE = 1000; // 1 second - debounce typing events
+
 // Error constants
 const ERROR_MESSAGES = {
     USER_NOT_AUTHENTICATED: 'User not authenticated',
@@ -147,6 +151,25 @@ interface AuthDto {
     platform: 'ios' | 'android' | 'web' | 'windows' | 'mac';
 }
 
+// Typing indicator DTOs
+interface TypingStartDto {
+    conversationId: string;
+    timestamp: number;
+}
+
+interface TypingStopDto {
+    conversationId: string;
+    timestamp: number;
+}
+
+interface TypingStatusDto {
+    conversationId: string;
+    userId: string;
+    userName: string;
+    isTyping: boolean;
+    timestamp: number;
+}
+
 /**
  * Chat Gateway - Real-time messaging with Socket.IO
  * 
@@ -183,6 +206,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly connectedUsers = new Map<string, Set<string>>(); // userId -> Set<socketId>
     private readonly socketToUser = new Map<string, string>(); // socketId -> userId
     private readonly socketToDevice = new Map<string, any>(); // socketId -> deviceInfo
+
+    // Typing indicator tracking
+    private readonly typingUsers = new Map<string, Map<string, {
+        userId: string;
+        userName: string;
+        timestamp: number;
+        timeoutId: NodeJS.Timeout;
+    }>>(); // conversationId -> Map<userId, typingInfo>
+    private readonly userTypingTimeouts = new Map<string, NodeJS.Timeout>(); // userId -> timeoutId
 
     constructor(
         private readonly socketAuthService: SocketAuthService,
@@ -329,6 +361,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 // Notify contacts about potential offline status
                 await this.notifyContactsAboutPresenceChange(userId, 'offline');
             }
+
+            // Clear typing indicators for this user
+            this.clearAllUserTyping(userId);
         }
 
         // Cleanup
@@ -402,12 +437,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                         downloadUrl: await this.filesService.generateDownloadUrl(
                             data.fileId,
                             userId,
-                            { expiresIn: 24 * 60 * 60 }
+                            { expiresIn: 24 * 60 * 60 * 30 }
                         ),
                         thumbnailUrl: fileDetails.thumbnailPath ? await this.filesService.generateDownloadUrl(
                             data.fileId,
                             userId,
-                            { expiresIn: 24 * 60 * 60 }
+                            { expiresIn: 24 * 60 * 60 * 30 }
                         ).then(url => `${url}&thumbnail=true`) : undefined,
                     };
                     filesMetadata = [singleFileMetadata];
@@ -436,12 +471,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                             downloadUrl: await this.filesService.generateDownloadUrl(
                                 fileId,
                                 userId,
-                                { expiresIn: 24 * 60 * 60 }
+                                { expiresIn: 24 * 60 * 60 * 30 }
                             ),
                             thumbnailUrl: fileDetails.thumbnailPath ? await this.filesService.generateDownloadUrl(
                                 fileId,
                                 userId,
-                                { expiresIn: 24 * 60 * 60 }
+                                { expiresIn: 24 * 60 * 60 * 30 }
                             ).then(url => `${url}&thumbnail=true`) : undefined,
                         };
                         filesMetadata.push(fileMetadata);
@@ -507,6 +542,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             const message = await this.messagesService.sendMessage(createMessageDto, userContext);
 
             this.logger.log(`Message created successfully`, message);
+
+            // Clear typing indicator for sender (message was sent)
+            this.clearUserTyping(data.conversationId, userId);
 
             // Update acknowledgment with real server ID and processed status
             client.emit('message_received', {
@@ -742,6 +780,117 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
     }
 
+    // ================= TYPING INDICATOR METHODS =================
+
+    /**
+     * Handle typing start event
+     * Client indicates user started typing in a conversation
+     */
+    @SubscribeMessage('typing_start')
+    async handleTypingStart(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: TypingStartDto,
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Typing start: User not authenticated');
+                return;
+            }
+
+            // Get user display name
+            const userName = await this.getUserDisplayName(userId);
+
+            // Update typing status
+            await this.setUserTyping(data.conversationId, userId, userName, true);
+
+            // Broadcast typing indicator to other participants (exclude sender)
+            const typingStatus: TypingStatusDto = {
+                conversationId: data.conversationId,
+                userId: userId,
+                userName: userName,
+                isTyping: true,
+                timestamp: Date.now(),
+            };
+
+            client.to(`conversation:${data.conversationId}`).emit('user_typing', typingStatus);
+
+            this.logger.debug(`User ${userId} started typing in conversation ${data.conversationId}`);
+
+        } catch (error) {
+            this.logger.error(`Typing start error for socket ${client.id}:`, error);
+        }
+    }
+
+    /**
+     * Handle typing stop event
+     * Client indicates user stopped typing in a conversation
+     */
+    @SubscribeMessage('typing_stop')
+    async handleTypingStop(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: TypingStopDto,
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Typing stop: User not authenticated');
+                return;
+            }
+
+            // Get user display name
+            const userName = await this.getUserDisplayName(userId);
+
+            // Update typing status
+            await this.setUserTyping(data.conversationId, userId, userName, false);
+
+            // Broadcast typing stop to other participants (exclude sender)
+            const typingStatus: TypingStatusDto = {
+                conversationId: data.conversationId,
+                userId: userId,
+                userName: userName,
+                isTyping: false,
+                timestamp: Date.now(),
+            };
+
+            client.to(`conversation:${data.conversationId}`).emit('user_typing', typingStatus);
+
+            this.logger.debug(`User ${userId} stopped typing in conversation ${data.conversationId}`);
+
+        } catch (error) {
+            this.logger.error(`Typing stop error for socket ${client.id}:`, error);
+        }
+    }
+
+    /**
+     * Get current typing users in a conversation
+     * Client can request who is currently typing
+     */
+    @SubscribeMessage('get_typing_users')
+    async handleGetTypingUsers(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { conversationId: string },
+    ) {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                this.logger.warn('Get typing users: User not authenticated');
+                return;
+            }
+
+            const typingUsers = this.getTypingUsersInConversation(data.conversationId, userId);
+
+            client.emit('typing_users_response', {
+                conversationId: data.conversationId,
+                typingUsers: typingUsers,
+                timestamp: Date.now(),
+            });
+
+        } catch (error) {
+            this.logger.error(`Get typing users error for socket ${client.id}:`, error);
+        }
+    }
+
     @SubscribeMessage('share_file')
     async handleShareFile(
         @ConnectedSocket() client: Socket,
@@ -767,7 +916,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             const downloadUrl = await this.filesService.generateDownloadUrl(
                 data.fileId,
                 userId,
-                { expiresIn: 24 * 60 * 60 } // 24 hours
+                { expiresIn: 24 * 60 * 60 * 30 } // 24 hours
             );
 
             // Create user context for service
@@ -797,6 +946,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             // Send message via Messages Service
             const message = await this.messagesService.sendMessage(createMessageDto, userContext);
+
+            // Clear typing indicator for sender (file message was sent)
+            this.clearUserTyping(data.conversationId, userId);
 
             // Link file to message in database for attachment history
             try {
@@ -831,7 +983,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                     thumbnailUrl: fileDetails.thumbnailPath ? await this.filesService.generateDownloadUrl(
                         data.fileId, // Use same fileId for thumbnail access
                         userId,
-                        { expiresIn: 24 * 60 * 60 }
+                        { expiresIn: 24 * 60 * 60 * 30 }
                     ).then(url => `${url}&thumbnail=true`) : undefined,
                 }
             };
@@ -929,6 +1081,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             // Send message via Messages Service
             const message = await this.messagesService.sendMessage(createMessageDto, userContext);
+
+            // Clear typing indicator for sender (quick file message was sent)
+            this.clearUserTyping(data.conversationId, userId);
 
             // Link file to message in database for attachment history
             try {
@@ -1081,7 +1236,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                     const downloadUrl = await this.filesService.generateDownloadUrl(
                         fileId,
                         userId,
-                        { expiresIn: 24 * 60 * 60 }
+                        { expiresIn: 24 * 60 * 60 * 30 }
                     );
 
                     const fileMetadata = {
@@ -1093,7 +1248,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                         thumbnailUrl: fileDetails.thumbnailPath ? await this.filesService.generateDownloadUrl(
                             fileId,
                             userId,
-                            { expiresIn: 24 * 60 * 60 }
+                            { expiresIn: 24 * 60 * 60 * 30 }
                         ).then(url => `${url}&thumbnail=true`) : undefined,
                     };
                     filesMetadata.push(fileMetadata);
@@ -1130,6 +1285,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             // Send message via Messages Service
             const message = await this.messagesService.sendMessage(createMessageDto, userContext);
+
+            // Clear typing indicator for sender (batch files message was sent)
+            this.clearUserTyping(data.conversationId, userId);
 
             // Link each file to message in database for attachment history
             try {
@@ -1606,6 +1764,170 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // ================= HELPER METHODS SECTION =================
 
+    // ================= TYPING INDICATOR HELPER METHODS =================
+
+    /**
+     * Set user typing status in a conversation
+     * @param conversationId - The conversation identifier
+     * @param userId - The user identifier
+     * @param userName - The user display name
+     * @param isTyping - Whether user is typing or not
+     */
+    private async setUserTyping(
+        conversationId: string,
+        userId: string,
+        userName: string,
+        isTyping: boolean
+    ): Promise<void> {
+        try {
+            if (!this.typingUsers.has(conversationId)) {
+                this.typingUsers.set(conversationId, new Map());
+            }
+
+            const conversationTyping = this.typingUsers.get(conversationId)!;
+
+            if (isTyping) {
+                // Clear existing timeout for this user
+                const existingTimeout = this.userTypingTimeouts.get(userId);
+                if (existingTimeout) {
+                    clearTimeout(existingTimeout);
+                }
+
+                // Set new typing status
+                const timeoutId = setTimeout(() => {
+                    this.clearUserTyping(conversationId, userId);
+                }, TYPING_TIMEOUT);
+
+                conversationTyping.set(userId, {
+                    userId,
+                    userName,
+                    timestamp: Date.now(),
+                    timeoutId
+                });
+
+                this.userTypingTimeouts.set(userId, timeoutId);
+
+            } else {
+                // Remove typing status
+                this.clearUserTyping(conversationId, userId);
+            }
+
+        } catch (error) {
+            this.logger.error(`Failed to set user typing status:`, error);
+        }
+    }
+
+    /**
+     * Clear user typing status
+     * @param conversationId - The conversation identifier
+     * @param userId - The user identifier
+     */
+    private clearUserTyping(conversationId: string, userId: string): void {
+        try {
+            const conversationTyping = this.typingUsers.get(conversationId);
+            if (conversationTyping) {
+                const typingInfo = conversationTyping.get(userId);
+                if (typingInfo) {
+                    clearTimeout(typingInfo.timeoutId);
+                    conversationTyping.delete(userId);
+
+                    // Cleanup empty conversation
+                    if (conversationTyping.size === 0) {
+                        this.typingUsers.delete(conversationId);
+                    }
+
+                    // Broadcast typing stop to conversation
+                    const typingStatus: TypingStatusDto = {
+                        conversationId,
+                        userId,
+                        userName: typingInfo.userName,
+                        isTyping: false,
+                        timestamp: Date.now(),
+                    };
+
+                    this.server.to(`conversation:${conversationId}`).emit('user_typing', typingStatus);
+                    this.logger.debug(`Auto-cleared typing status for user ${userId} in conversation ${conversationId}`);
+                }
+            }
+
+            // Clear user timeout tracking
+            const timeoutId = this.userTypingTimeouts.get(userId);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                this.userTypingTimeouts.delete(userId);
+            }
+
+        } catch (error) {
+            this.logger.error(`Failed to clear user typing status:`, error);
+        }
+    }
+
+    /**
+     * Get typing users in a conversation (excluding specified user)
+     * @param conversationId - The conversation identifier
+     * @param excludeUserId - User ID to exclude from results
+     * @returns Array of typing users
+     */
+    private getTypingUsersInConversation(conversationId: string, excludeUserId?: string): Array<{
+        userId: string;
+        userName: string;
+        timestamp: number;
+    }> {
+        try {
+            const conversationTyping = this.typingUsers.get(conversationId);
+            if (!conversationTyping || conversationTyping.size === 0) {
+                return [];
+            }
+
+            const typingUsers: Array<{
+                userId: string;
+                userName: string;
+                timestamp: number;
+            }> = [];
+
+            conversationTyping.forEach((typingInfo, userId) => {
+                if (!excludeUserId || userId !== excludeUserId) {
+                    typingUsers.push({
+                        userId: typingInfo.userId,
+                        userName: typingInfo.userName,
+                        timestamp: typingInfo.timestamp,
+                    });
+                }
+            });
+
+            return typingUsers;
+
+        } catch (error) {
+            this.logger.error(`Failed to get typing users in conversation:`, error);
+            return [];
+        }
+    }
+
+    /**
+     * Clear all typing status for a user (called on disconnect)
+     * @param userId - The user identifier
+     */
+    private clearAllUserTyping(userId: string): void {
+        try {
+            // Clear from all conversations
+            this.typingUsers.forEach((conversationTyping, conversationId) => {
+                if (conversationTyping.has(userId)) {
+                    this.clearUserTyping(conversationId, userId);
+                }
+            });
+
+            // Clear user timeout tracking
+            const timeoutId = this.userTypingTimeouts.get(userId);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                this.userTypingTimeouts.delete(userId);
+            }
+
+        } catch (error) {
+            this.logger.error(`Failed to clear all user typing status:`, error);
+        }
+    }
+
     async handleLeaveConversations(
         @ConnectedSocket() client: Socket,
         @MessageBody() data: JoinConversationsDto,
@@ -2042,6 +2364,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
      * Generate appropriate content message based on file type
      */
     private generateFileContentMessage(type: string, fileName: string): string {
+        return "";
         const fileEmojis = {
             'image': '🖼️',
             'audio': '🎵',
@@ -2058,6 +2381,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
      * Generate content message for batch files
      */
     private generateBatchFileContentMessage(filesCount: number, fileNames: string[]): string {
+        return "";
         if (filesCount === 1) {
             return `📎 ${fileNames[0]}`;
         }
@@ -2435,17 +2759,24 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         @MessageBody() data: GetConversationsLastMessagesDto,
     ) {
         try {
+            this.logger.debug(`Get lastMessages request from client ${client.id}:`, data);
+
             const userId = this.socketToUser.get(client.id);
             if (!userId) {
-                this.logger.warn('Get lastMessages: User not authenticated');
+                this.logger.warn(`Get lastMessages: User not authenticated for client ${client.id}`);
+                this.logger.debug(`Current socketToUser map:`, Object.fromEntries(this.socketToUser));
                 return;
             }
+
+            this.logger.debug(`Get lastMessages for user ${userId}, conversations:`, data.conversationIds);
 
             // Get lastMessages from service
             const lastMessages = await this.lastMessageService.getBulkConversationsLastMessages(
                 data.conversationIds,
                 userId
             );
+
+            this.logger.debug(`Retrieved lastMessages for user ${userId}:`, lastMessages);
 
             // Convert to response format
             const updates: ConversationLastMessageUpdate[] = [];

@@ -193,11 +193,12 @@ export class DeviceService {
       throw new BadRequestException('Invalid device name - must be between 1-100 characters');
     }
 
+
     if (!['mobile', 'web', 'desktop'].includes(deviceInfo.deviceType)) {
       throw new BadRequestException('Invalid device type - must be mobile, web, or desktop');
     }
 
-    if (deviceInfo.platform && !['ios', 'android', 'web', 'windows', 'macos'].includes(deviceInfo.platform.toLowerCase())) {
+    if (deviceInfo.platform && !['ios', 'android', 'web', 'windows', 'macos', 'ipados'].includes(deviceInfo.platform.toLowerCase())) {
       throw new BadRequestException('Invalid platform - must be ios, android, web, windows, or macos');
     }
   }

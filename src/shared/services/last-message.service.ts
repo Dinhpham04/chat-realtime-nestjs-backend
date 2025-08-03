@@ -115,6 +115,8 @@ export class LastMessageService implements ILastMessageService {
                         userId
                     );
 
+                    this.logger.debug("📨 Last message found time stamp:", lastMessage.timestamp);
+
                     results.set(convId, lastMessage);
                 }
             }
@@ -146,7 +148,7 @@ export class LastMessageService implements ILastMessageService {
                     message.attachments
                 ).preview,
                 messageType: message.type,
-                timestamp: message.createdAt || Date.now(),
+                timestamp: this.convertToTimestamp(message.createdAt),
                 readBy: [message.senderId], // Sender has "read" their own message
                 deliveredTo: [], // Will be updated as delivery confirmations come in
                 isRead: false, // Will be set per user context
@@ -155,6 +157,14 @@ export class LastMessageService implements ILastMessageService {
 
             // Save to Redis cache
             await this.cacheLastMessage(conversationId, lastMessage);
+
+            this.logger.debug(`📨 LastMessage created with timestamp:`, {
+                messageId: lastMessage.messageId,
+                conversationId: conversationId,
+                originalCreatedAt: message.createdAt,
+                convertedTimestamp: lastMessage.timestamp,
+                timestampType: typeof lastMessage.timestamp
+            });
 
             // Emit event for real-time broadcasting
             this.eventEmitter.emit('lastmessage.updated', {
@@ -422,6 +432,9 @@ export class LastMessageService implements ILastMessageService {
      * Serialize lastMessage for Redis storage
      */
     private serializeLastMessage(lastMessage: LastMessageDto): Record<string, string> {
+        // Ensure timestamp is properly converted to string
+        const timestamp = this.convertToTimestamp(lastMessage.timestamp);
+
         return {
             messageId: lastMessage.messageId,
             conversationId: lastMessage.conversationId,
@@ -429,7 +442,7 @@ export class LastMessageService implements ILastMessageService {
             senderName: lastMessage.senderName,
             content: lastMessage.content,
             messageType: lastMessage.messageType,
-            timestamp: lastMessage.timestamp.toString(),
+            timestamp: timestamp.toString(),
             readBy: JSON.stringify(lastMessage.readBy),
             deliveredTo: JSON.stringify(lastMessage.deliveredTo),
             attachmentCount: (lastMessage.attachmentCount || 0).toString(),
@@ -440,18 +453,67 @@ export class LastMessageService implements ILastMessageService {
      * Deserialize lastMessage from Redis
      */
     private deserializeLastMessage(data: Record<string, string>): LastMessageDto {
+        // Convert timestamp safely
+        let timestamp = parseInt(data.timestamp, 10);
+        if (isNaN(timestamp)) {
+            this.logger.warn(`❌ Invalid timestamp in Redis data:`, {
+                rawTimestamp: data.timestamp,
+                timestampType: typeof data.timestamp,
+                parsedResult: timestamp,
+                conversationId: data.conversationId,
+                messageId: data.messageId
+            });
+            timestamp = Date.now();
+        } else {
+            this.logger.debug(`✅ Successfully parsed timestamp:`, {
+                rawTimestamp: data.timestamp,
+                parsedTimestamp: timestamp,
+                conversationId: data.conversationId,
+                messageId: data.messageId
+            });
+        }
+
+        // Safely parse JSON fields
+        let readBy: string[] = [];
+        let deliveredTo: string[] = [];
+        let attachmentCount = 0;
+
+        try {
+            readBy = JSON.parse(data.readBy || '[]');
+        } catch (error) {
+            this.logger.warn(`❌ Failed to parse readBy JSON for ${data.messageId}:`, error);
+            readBy = [];
+        }
+
+        try {
+            deliveredTo = JSON.parse(data.deliveredTo || '[]');
+        } catch (error) {
+            this.logger.warn(`❌ Failed to parse deliveredTo JSON for ${data.messageId}:`, error);
+            deliveredTo = [];
+        }
+
+        try {
+            attachmentCount = parseInt(data.attachmentCount || '0', 10);
+            if (isNaN(attachmentCount)) {
+                attachmentCount = 0;
+            }
+        } catch (error) {
+            this.logger.warn(`❌ Failed to parse attachmentCount for ${data.messageId}:`, error);
+            attachmentCount = 0;
+        }
+
         return {
-            messageId: data.messageId,
-            conversationId: data.conversationId,
-            senderId: data.senderId,
-            senderName: data.senderName,
-            content: data.content,
-            messageType: data.messageType as any,
-            timestamp: parseInt(data.timestamp, 10),
-            readBy: JSON.parse(data.readBy || '[]'),
-            deliveredTo: JSON.parse(data.deliveredTo || '[]'),
+            messageId: data.messageId || 'unknown',
+            conversationId: data.conversationId || 'unknown',
+            senderId: data.senderId || 'unknown',
+            senderName: data.senderName || 'Unknown User',
+            content: data.content || '',
+            messageType: data.messageType as any || 'text',
+            timestamp: timestamp,
+            readBy: readBy,
+            deliveredTo: deliveredTo,
             isRead: false, // Will be set per user context
-            attachmentCount: parseInt(data.attachmentCount || '0', 10),
+            attachmentCount: attachmentCount,
         };
     }
 
@@ -497,5 +559,37 @@ export class LastMessageService implements ILastMessageService {
             this.logger.error(`Failed to get unread count:`, error);
             return 0;
         }
+    }
+
+    // ================= PRIVATE HELPER METHODS =================
+
+    /**
+     * Convert various timestamp formats to number
+     * Handles Date objects, ISO strings, and numbers
+     */
+    private convertToTimestamp(timestamp: any): number {
+        if (!timestamp) {
+            return Date.now();
+        }
+
+        // If already a number, return as is
+        if (typeof timestamp === 'number') {
+            return timestamp;
+        }
+
+        // If it's a Date object
+        if (timestamp instanceof Date) {
+            return timestamp.getTime();
+        }
+
+        // If it's a string (ISO format)
+        if (typeof timestamp === 'string') {
+            const parsed = Date.parse(timestamp);
+            return isNaN(parsed) ? Date.now() : parsed;
+        }
+
+        // Fallback to current time
+        this.logger.warn(`Invalid timestamp format: ${timestamp}, using current time`);
+        return Date.now();
     }
 }

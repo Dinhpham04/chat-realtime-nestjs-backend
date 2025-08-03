@@ -3601,4 +3601,1391 @@ CREATE TABLE message_attachments (
 
 **🔑 KEY TAKEAWAY: Zalo tách riêng Messages và Files hoàn toàn, sử dụng junction table để link. Strategy này optimize cho both performance và storage efficiency!**
 
-**Bạn muốn tôi implement schema này cho NestJS project với TypeORM không?** 🚀
+---
+
+## 🔔 **ZALO'S PUSH NOTIFICATION ARCHITECTURE (Deep Analysis)**
+
+### **🎯 A. ZALO'S PUSH NOTIFICATION STRATEGY (Reverse Engineering)**
+
+#### **1. Multi-Platform Push Infrastructure:**
+```typescript
+// Zalo's push notification systems (Observed behavior)
+interface ZaloPushInfrastructure {
+  // 📱 MOBILE PLATFORMS
+  ios: {
+    provider: 'Apple Push Notification Service (APNs)',
+    certificate: 'Production & Development certificates',
+    payload: 'Silent push + Rich notifications',
+    badgeCount: 'Server-side calculation',
+    sounds: 'Custom notification sounds'
+  },
+  
+  android: {
+    provider: 'Firebase Cloud Messaging (FCM)',
+    payload: 'Data messages + Notification messages',
+    channels: 'Multiple notification channels',
+    priority: 'High priority for instant delivery',
+    collapse: 'Collapse key cho message grouping'
+  },
+  
+  // 💻 DESKTOP PLATFORMS
+  web: {
+    provider: 'Web Push API (Chrome/Firefox/Edge)',
+    serviceWorker: 'Background sync + notification display',
+    vapid: 'VAPID keys for authentication',
+    permission: 'Runtime permission request'
+  },
+  
+  desktop: {
+    windows: 'Windows Notification System',
+    macos: 'macOS Notification Center',
+    linux: 'libnotify / Desktop notifications'
+  }
+}
+```
+
+#### **2. Push Notification Flow Analysis:**
+```typescript
+// Zalo's complete push flow (Step-by-step)
+const zaloPushFlow = {
+  // 🚀 STEP 1: Device Registration
+  deviceRegistration: {
+    onAppInstall: 'Register device với push service',
+    onAppLaunch: 'Refresh push token',
+    onLogin: 'Associate push token với user account',
+    onLogout: 'Unregister push token',
+    tokenRefresh: 'Handle token refresh events'
+  },
+  
+  // 📨 STEP 2: Message Event Trigger
+  messageEvent: {
+    newMessage: 'User receives new message',
+    condition: 'User is offline OR app in background',
+    delay: '5-10 seconds (batch multiple messages)',
+    deduplication: 'Avoid duplicate notifications'
+  },
+  
+  // 🎯 STEP 3: Smart Notification Logic
+  smartLogic: {
+    userPresence: 'Check if user is actively using app',
+    deviceSync: 'Only notify primary device if multiple active',
+    conversationMute: 'Respect conversation mute settings',
+    doNotDisturb: 'Honor user DND preferences',
+    priority: 'VIP contacts get priority delivery'
+  },
+  
+  // 🔔 STEP 4: Notification Delivery
+  delivery: {
+    payload: 'Optimized payload size',
+    fallback: 'SMS fallback for critical messages',
+    analytics: 'Track delivery rates và user engagement',
+    retry: 'Exponential backoff for failed deliveries'
+  }
+};
+```
+
+### **📱 B. MOBILE PUSH IMPLEMENTATION ANALYSIS**
+
+#### **1. iOS Push Notifications (APNs):**
+```json
+// Zalo iOS push payload (Observed structure)
+{
+  "aps": {
+    "alert": {
+      "title": "Nguyễn Văn A",
+      "body": "Gửi một tin nhắn",
+      "category": "MESSAGE_CATEGORY"
+    },
+    "badge": 3,
+    "sound": "zalo_message.caf",
+    "mutable-content": 1,
+    "content-available": 1
+  },
+  "custom_data": {
+    "message_id": "msg_123456",
+    "conversation_id": "conv_789",
+    "sender_id": "user_456",
+    "sender_avatar": "https://avatar.zalo.me/user_456.jpg",
+    "message_type": "text",
+    "encrypted_content": "encrypted_message_data",
+    "timestamp": 1627890123456
+  }
+}
+```
+
+#### **2. Android Push Notifications (FCM):**
+```json
+// Zalo Android push payload (Observed structure)
+{
+  "message": {
+    "token": "device_fcm_token",
+    "android": {
+      "priority": "high",
+      "notification": {
+        "title": "Nguyễn Văn A",
+        "body": "Gửi một tin nhắn",
+        "icon": "ic_notification",
+        "color": "#0068FF",
+        "channel_id": "ZALO_MESSAGES",
+        "click_action": "OPEN_CONVERSATION"
+      },
+      "data": {
+        "message_id": "msg_123456",
+        "conversation_id": "conv_789",
+        "sender_id": "user_456",
+        "action": "new_message",
+        "encrypted_payload": "encrypted_data"
+      }
+    }
+  }
+}
+```
+
+#### **3. Web Push Notifications:**
+```typescript
+// Zalo Web push implementation (Service Worker)
+self.addEventListener('push', event => {
+  const data = event.data.json();
+  
+  const options = {
+    body: data.message.content,
+    icon: data.sender.avatar || '/icons/zalo-icon-192x192.png',
+    badge: '/icons/zalo-badge-72x72.png',
+    image: data.message.image,
+    tag: `conversation_${data.conversation.id}`,
+    renotify: true,
+    requireInteraction: true,
+    actions: [
+      {
+        action: 'reply',
+        title: 'Trả lời',
+        icon: '/icons/reply-icon.png'
+      },
+      {
+        action: 'mark_read',
+        title: 'Đánh dấu đã đọc',
+        icon: '/icons/read-icon.png'
+      }
+    ],
+    data: {
+      conversationId: data.conversation.id,
+      messageId: data.message.id,
+      senderId: data.sender.id
+    }
+  };
+  
+  event.waitUntil(
+    self.registration.showNotification(data.sender.name, options)
+  );
+});
+```
+
+### **🏗️ C. BACKEND PUSH NOTIFICATION ARCHITECTURE**
+
+#### **1. Push Service Infrastructure:**
+```typescript
+// Zalo's backend push service (Inferred architecture)
+@Injectable()
+export class PushNotificationService {
+  constructor(
+    private readonly apnsService: APNsService,
+    private readonly fcmService: FCMService,
+    private readonly webPushService: WebPushService,
+    private readonly redisService: RedisService,
+    private readonly userDeviceService: UserDeviceService
+  ) {}
+  
+  async sendMessageNotification(
+    messageId: string,
+    senderId: string,
+    recipientId: string,
+    conversationId: string
+  ): Promise<void> {
+    
+    // 1. Check if user should receive push notification
+    const shouldNotify = await this.shouldSendPushNotification(
+      recipientId,
+      conversationId,
+      senderId
+    );
+    
+    if (!shouldNotify) return;
+    
+    // 2. Get user's devices
+    const userDevices = await this.userDeviceService.getActiveDevices(recipientId);
+    
+    // 3. Filter devices based on smart logic
+    const notificationDevices = await this.filterNotificationDevices(
+      userDevices,
+      recipientId
+    );
+    
+    // 4. Send notifications to each platform
+    const notifications = notificationDevices.map(device => {
+      switch (device.platform) {
+        case 'ios':
+          return this.sendIOSNotification(device, messageData);
+        case 'android':
+          return this.sendAndroidNotification(device, messageData);
+        case 'web':
+          return this.sendWebNotification(device, messageData);
+        default:
+          return Promise.resolve();
+      }
+    });
+    
+    // 5. Send all notifications in parallel
+    await Promise.allSettled(notifications);
+    
+    // 6. Track notification delivery
+    await this.trackNotificationDelivery(messageId, recipientId, notificationDevices);
+  }
+  
+  private async shouldSendPushNotification(
+    userId: string,
+    conversationId: string,
+    senderId: string
+  ): Promise<boolean> {
+    
+    // Check user online status
+    const isUserOnline = await this.redisService.isUserOnline(userId);
+    if (isUserOnline) {
+      // User is online, check if actively using app
+      const isActivelyUsing = await this.redisService.isUserActivelyUsing(userId);
+      if (isActivelyUsing) return false; // Don't send push if actively using
+    }
+    
+    // Check conversation mute status
+    const isConversationMuted = await this.redisService.isConversationMuted(
+      userId,
+      conversationId
+    );
+    if (isConversationMuted) return false;
+    
+    // Check Do Not Disturb settings
+    const isDNDActive = await this.redisService.isUserDNDActive(userId);
+    if (isDNDActive) {
+      // Check if sender is VIP contact
+      const isVIPContact = await this.redisService.isVIPContact(userId, senderId);
+      if (!isVIPContact) return false;
+    }
+    
+    // Check recent notification throttling
+    const recentNotificationCount = await this.redisService.getRecentNotificationCount(
+      userId,
+      300 // 5 minutes
+    );
+    if (recentNotificationCount > 10) return false; // Throttle excessive notifications
+    
+    return true;
+  }
+  
+  private async filterNotificationDevices(
+    devices: UserDevice[],
+    userId: string
+  ): Promise<UserDevice[]> {
+    
+    // Smart device selection logic
+    const activeDevices = devices.filter(device => device.isActive);
+    
+    if (activeDevices.length === 0) return [];
+    
+    // If user has multiple active devices, prioritize primary device
+    if (activeDevices.length > 1) {
+      const primaryDevice = await this.redisService.getUserPrimaryDevice(userId);
+      if (primaryDevice) {
+        return activeDevices.filter(device => device.id === primaryDevice.id);
+      }
+    }
+    
+    // Otherwise, send to all active devices
+    return activeDevices;
+  }
+}
+```
+
+#### **2. Platform-Specific Services:**
+```typescript
+// iOS APNs Service
+@Injectable()
+export class APNsService {
+  private apnProvider: apn.Provider;
+  
+  constructor() {
+    this.apnProvider = new apn.Provider({
+      token: {
+        key: process.env.APNS_KEY_PATH,
+        keyId: process.env.APNS_KEY_ID,
+        teamId: process.env.APNS_TEAM_ID
+      },
+      production: process.env.NODE_ENV === 'production'
+    });
+  }
+  
+  async sendNotification(device: UserDevice, messageData: any): Promise<void> {
+    const notification = new apn.Notification();
+    
+    notification.alert = {
+      title: messageData.senderName,
+      body: this.formatMessageContent(messageData.content, messageData.type)
+    };
+    
+    notification.badge = await this.calculateBadgeCount(device.userId);
+    notification.sound = 'zalo_message.caf';
+    notification.category = 'MESSAGE_CATEGORY';
+    notification.mutableContent = 1;
+    
+    // Custom payload
+    notification.payload = {
+      message_id: messageData.messageId,
+      conversation_id: messageData.conversationId,
+      sender_id: messageData.senderId,
+      timestamp: messageData.timestamp
+    };
+    
+    try {
+      const result = await this.apnProvider.send(notification, device.pushToken);
+      
+      if (result.failed.length > 0) {
+        // Handle failed notifications
+        await this.handleFailedNotification(device, result.failed[0]);
+      }
+    } catch (error) {
+      console.error('APNs notification failed:', error);
+      throw error;
+    }
+  }
+  
+  private formatMessageContent(content: string, type: string): string {
+    switch (type) {
+      case 'text':
+        return content.length > 100 ? content.substring(0, 100) + '...' : content;
+      case 'image':
+        return '📷 Gửi một hình ảnh';
+      case 'file':
+        return '📎 Gửi một tệp tin';
+      case 'sticker':
+        return '😀 Gửi một sticker';
+      default:
+        return 'Gửi một tin nhắn';
+    }
+  }
+}
+
+// Android FCM Service
+@Injectable()
+export class FCMService {
+  private admin: admin.app.App;
+  
+  constructor() {
+    this.admin = admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: process.env.FCM_PROJECT_ID,
+        clientEmail: process.env.FCM_CLIENT_EMAIL,
+        privateKey: process.env.FCM_PRIVATE_KEY.replace(/\\n/g, '\n')
+      })
+    });
+  }
+  
+  async sendNotification(device: UserDevice, messageData: any): Promise<void> {
+    const message: admin.messaging.Message = {
+      token: device.pushToken,
+      android: {
+        priority: 'high',
+        notification: {
+          title: messageData.senderName,
+          body: this.formatMessageContent(messageData.content, messageData.type),
+          icon: 'ic_notification',
+          color: '#0068FF',
+          channelId: 'ZALO_MESSAGES',
+          clickAction: 'OPEN_CONVERSATION'
+        },
+        data: {
+          message_id: messageData.messageId,
+          conversation_id: messageData.conversationId,
+          sender_id: messageData.senderId,
+          action: 'new_message',
+          timestamp: messageData.timestamp.toString()
+        }
+      }
+    };
+    
+    try {
+      const response = await this.admin.messaging().send(message);
+      console.log('FCM notification sent successfully:', response);
+    } catch (error) {
+      console.error('FCM notification failed:', error);
+      
+      // Handle token refresh
+      if (error.code === 'messaging/registration-token-not-registered') {
+        await this.handleInvalidToken(device);
+      }
+      
+      throw error;
+    }
+  }
+}
+
+// Web Push Service
+@Injectable()
+export class WebPushService {
+  constructor() {
+    webpush.setVapidDetails(
+      'mailto:your-email@example.com',
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+  }
+  
+  async sendNotification(device: UserDevice, messageData: any): Promise<void> {
+    const payload = JSON.stringify({
+      title: messageData.senderName,
+      body: this.formatMessageContent(messageData.content, messageData.type),
+      icon: messageData.senderAvatar || '/icons/zalo-icon-192x192.png',
+      badge: '/icons/zalo-badge-72x72.png',
+      data: {
+        messageId: messageData.messageId,
+        conversationId: messageData.conversationId,
+        senderId: messageData.senderId,
+        timestamp: messageData.timestamp
+      }
+    });
+    
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: device.pushEndpoint,
+          keys: {
+            p256dh: device.p256dh,
+            auth: device.auth
+          }
+        },
+        payload
+      );
+    } catch (error) {
+      console.error('Web push notification failed:', error);
+      throw error;
+    }
+  }
+}
+```
+
+### **🎯 D. REDIS CACHING STRATEGY FOR PUSH NOTIFICATIONS**
+
+#### **1. Redis Schema for Push Features:**
+```typescript
+// Redis keys cho push notification system
+interface PushRedisSchema {
+  // 📱 Device Management
+  userDevices: {
+    key: 'user_devices:{userId}',
+    type: 'Hash',
+    fields: {
+      deviceId: 'JSON serialized device info',
+      // Includes: platform, pushToken, isActive, lastSeen
+    },
+    ttl: '30 days'
+  },
+  
+  // 🔔 Notification Settings
+  notificationSettings: {
+    key: 'notification_settings:{userId}',
+    type: 'Hash',
+    fields: {
+      globalEnabled: 'boolean',
+      soundEnabled: 'boolean',
+      vibrationEnabled: 'boolean',
+      dndStart: 'HH:mm',
+      dndEnd: 'HH:mm',
+      vipContacts: 'JSON array of user IDs'
+    },
+    ttl: 'No expiry'
+  },
+  
+  // 🔕 Conversation Muting
+  mutedConversations: {
+    key: 'muted_conversations:{userId}',
+    type: 'Set',
+    values: 'conversationId',
+    ttl: 'No expiry'
+  },
+  
+  // ⏰ Notification Throttling
+  recentNotifications: {
+    key: 'recent_notifications:{userId}',
+    type: 'Sorted Set',
+    score: 'timestamp',
+    value: 'notificationId',
+    ttl: '1 hour'
+  },
+  
+  // 📊 Badge Counts
+  badgeCounts: {
+    key: 'badge_count:{userId}',
+    type: 'Hash',
+    fields: {
+      total: 'number',
+      conversationId: 'unread count for conversation'
+    },
+    ttl: '7 days'
+  },
+  
+  // 🎯 User Presence for Smart Notifications
+  userPresence: {
+    key: 'user_presence:{userId}',
+    type: 'Hash',
+    fields: {
+      status: 'online|offline|away',
+      lastActive: 'timestamp',
+      activeDeviceId: 'current active device',
+      isActivelyUsing: 'boolean'
+    },
+    ttl: '1 hour'
+  }
+}
+```
+
+#### **2. Smart Notification Logic with Redis:**
+```typescript
+@Injectable()
+export class SmartNotificationService {
+  constructor(private readonly redisService: RedisService) {}
+  
+  async shouldSendNotification(
+    userId: string,
+    conversationId: string,
+    messageType: string
+  ): Promise<boolean> {
+    
+    // 1. Check global notification settings
+    const settings = await this.redisService.hgetall(`notification_settings:${userId}`);
+    if (settings.globalEnabled === 'false') return false;
+    
+    // 2. Check conversation mute status
+    const isMuted = await this.redisService.sismember(
+      `muted_conversations:${userId}`,
+      conversationId
+    );
+    if (isMuted) return false;
+    
+    // 3. Check Do Not Disturb
+    if (await this.isDNDActive(userId, settings)) {
+      // Only allow VIP contacts during DND
+      return await this.isVIPMessage(userId, conversationId);
+    }
+    
+    // 4. Check notification throttling
+    const recentCount = await this.redisService.zcount(
+      `recent_notifications:${userId}`,
+      Date.now() - 300000, // 5 minutes ago
+      Date.now()
+    );
+    if (recentCount > 10) return false; // Max 10 notifications per 5 minutes
+    
+    // 5. Check user presence
+    const presence = await this.redisService.hgetall(`user_presence:${userId}`);
+    if (presence.isActivelyUsing === 'true') return false;
+    
+    return true;
+  }
+  
+  async trackNotification(userId: string, notificationId: string): Promise<void> {
+    // Add to recent notifications for throttling
+    await this.redisService.zadd(
+      `recent_notifications:${userId}`,
+      Date.now(),
+      notificationId
+    );
+    
+    // Clean old notifications (older than 1 hour)
+    await this.redisService.zremrangebyscore(
+      `recent_notifications:${userId}`,
+      0,
+      Date.now() - 3600000
+    );
+  }
+  
+  async updateBadgeCount(userId: string, conversationId: string): Promise<number> {
+    // Increment badge count
+    const newCount = await this.redisService.hincrby(
+      `badge_count:${userId}`,
+      'total',
+      1
+    );
+    
+    // Update conversation-specific count
+    await this.redisService.hincrby(
+      `badge_count:${userId}`,
+      conversationId,
+      1
+    );
+    
+    return newCount;
+  }
+}
+```
+
+### **📱 E. REACT NATIVE EXPO IMPLEMENTATION**
+
+#### **1. Push Notification Setup (Expo):**
+```typescript
+// React Native Expo push notification setup
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+
+// Configure notification behavior
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
+export class PushNotificationManager {
+  private notificationListener: any;
+  private responseListener: any;
+  
+  async initialize(): Promise<void> {
+    // Request permissions
+    await this.registerForPushNotificationsAsync();
+    
+    // Listen for incoming notifications
+    this.notificationListener = Notifications.addNotificationReceivedListener(
+      this.handleNotificationReceived
+    );
+    
+    // Listen for notification interactions
+    this.responseListener = Notifications.addNotificationResponseReceivedListener(
+      this.handleNotificationResponse
+    );
+  }
+  
+  private async registerForPushNotificationsAsync(): Promise<string | undefined> {
+    let token;
+    
+    if (Device.isDevice) {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        throw new Error('Permission not granted for push notifications');
+      }
+      
+      // Get Expo push token
+      token = (await Notifications.getExpoPushTokenAsync({
+        projectId: Constants.expoConfig?.extra?.eas?.projectId,
+      })).data;
+      
+      // Register token with backend
+      await this.registerTokenWithBackend(token);
+      
+    } else {
+      console.log('Must use physical device for Push Notifications');
+    }
+    
+    // Configure notification channels (Android)
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('messages', {
+        name: 'Messages',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF231F7C',
+        sound: 'zalo_message.wav',
+      });
+    }
+    
+    return token;
+  }
+  
+  private async registerTokenWithBackend(token: string): Promise<void> {
+    try {
+      await fetch(`${API_BASE_URL}/users/devices/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getAuthToken()}`,
+        },
+        body: JSON.stringify({
+          platform: Platform.OS,
+          pushToken: token,
+          deviceId: getDeviceId(),
+          deviceInfo: {
+            model: Device.modelName,
+            osVersion: Device.osVersion,
+            appVersion: Constants.expoConfig?.version,
+          }
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to register push token:', error);
+    }
+  }
+  
+  private handleNotificationReceived = (notification: Notifications.Notification) => {
+    console.log('Notification received:', notification);
+    
+    // Extract custom data
+    const { messageId, conversationId, senderId } = notification.request.content.data;
+    
+    // Update local state if app is active
+    if (AppState.currentState === 'active') {
+      // Mark as delivered
+      this.markMessageAsDelivered(messageId);
+      
+      // Update conversation if user is viewing it
+      if (getCurrentConversationId() === conversationId) {
+        // Auto-mark as read if viewing conversation
+        this.markMessageAsRead(messageId);
+      }
+    }
+  };
+  
+  private handleNotificationResponse = (response: Notifications.NotificationResponse) => {
+    console.log('Notification response:', response);
+    
+    const { messageId, conversationId, senderId } = response.notification.request.content.data;
+    
+    // Handle different actions
+    switch (response.actionIdentifier) {
+      case 'reply':
+        // Open quick reply
+        this.openQuickReply(conversationId);
+        break;
+      
+      case 'mark_read':
+        // Mark as read
+        this.markMessageAsRead(messageId);
+        break;
+      
+      default:
+        // Default action - open conversation
+        this.openConversation(conversationId);
+        break;
+    }
+  };
+  
+  async setBadgeCount(count: number): Promise<void> {
+    await Notifications.setBadgeCountAsync(count);
+  }
+  
+  async clearNotifications(): Promise<void> {
+    await Notifications.dismissAllNotificationsAsync();
+  }
+  
+  cleanup(): void {
+    if (this.notificationListener) {
+      Notifications.removeNotificationSubscription(this.notificationListener);
+    }
+    
+    if (this.responseListener) {
+      Notifications.removeNotificationSubscription(this.responseListener);
+    }
+  }
+}
+```
+
+#### **2. Integration với Chat State Management:**
+```typescript
+// Redux/Zustand store integration
+export const useChatStore = create<ChatState>((set, get) => ({
+  conversations: [],
+  messages: new Map(),
+  unreadCounts: new Map(),
+  
+  // Push notification handlers
+  handlePushNotification: (notification: PushNotificationData) => {
+    const { messageId, conversationId, content, senderId, senderName } = notification;
+    
+    // Add message to store
+    set(state => {
+      const messages = new Map(state.messages);
+      const conversationMessages = messages.get(conversationId) || [];
+      
+      const newMessage = {
+        id: messageId,
+        conversationId,
+        senderId,
+        senderName,
+        content,
+        timestamp: new Date(),
+        status: 'delivered',
+        isFromPush: true
+      };
+      
+      messages.set(conversationId, [...conversationMessages, newMessage]);
+      
+      // Update unread count
+      const unreadCounts = new Map(state.unreadCounts);
+      unreadCounts.set(conversationId, (unreadCounts.get(conversationId) || 0) + 1);
+      
+      return {
+        messages,
+        unreadCounts
+      };
+    });
+    
+    // Update badge count
+    const totalUnread = Array.from(get().unreadCounts.values()).reduce((sum, count) => sum + count, 0);
+    PushNotificationManager.setBadgeCount(totalUnread);
+  },
+  
+  markMessageAsRead: (messageId: string, conversationId: string) => {
+    // Mark message as read in store
+    set(state => {
+      const messages = new Map(state.messages);
+      const conversationMessages = messages.get(conversationId) || [];
+      
+      const updatedMessages = conversationMessages.map(msg => 
+        msg.id === messageId ? { ...msg, status: 'read' } : msg
+      );
+      
+      messages.set(conversationId, updatedMessages);
+      
+      // Clear unread count for conversation
+      const unreadCounts = new Map(state.unreadCounts);
+      unreadCounts.set(conversationId, 0);
+      
+      return { messages, unreadCounts };
+    });
+    
+    // Update badge count
+    const totalUnread = Array.from(get().unreadCounts.values()).reduce((sum, count) => sum + count, 0);
+    PushNotificationManager.setBadgeCount(totalUnread);
+    
+    // Send read receipt to backend
+    WebSocketManager.emit('mark_as_read', {
+      messageIds: [messageId],
+      conversationId,
+      readAt: Date.now()
+    });
+  }
+}));
+```
+
+### **🏗️ F. NESTJS PUSH NOTIFICATION MODULE ARCHITECTURE**
+
+#### **1. Module Structure:**
+```typescript
+// src/modules/push-notifications/push-notifications.module.ts
+@Module({
+  imports: [
+    RedisModule,
+    UsersModule,
+    ConversationsModule,
+    forwardRef(() => MessagesModule)
+  ],
+  providers: [
+    PushNotificationService,
+    APNsService,
+    FCMService,
+    WebPushService,
+    SmartNotificationService,
+    DeviceRegistrationService,
+    NotificationSettingsService
+  ],
+  controllers: [
+    PushNotificationController,
+    DeviceRegistrationController
+  ],
+  exports: [
+    PushNotificationService,
+    SmartNotificationService
+  ]
+})
+export class PushNotificationsModule {}
+
+// src/modules/push-notifications/controllers/device-registration.controller.ts
+@Controller('users/devices')
+@UseGuards(AuthGuard)
+export class DeviceRegistrationController {
+  constructor(
+    private readonly deviceRegistrationService: DeviceRegistrationService
+  ) {}
+  
+  @Post('register')
+  async registerDevice(
+    @Body() dto: RegisterDeviceDto,
+    @CurrentUser() user: User
+  ): Promise<{ success: boolean }> {
+    await this.deviceRegistrationService.registerDevice(user.id, dto);
+    return { success: true };
+  }
+  
+  @Delete('unregister')
+  async unregisterDevice(
+    @Body() dto: UnregisterDeviceDto,
+    @CurrentUser() user: User
+  ): Promise<{ success: boolean }> {
+    await this.deviceRegistrationService.unregisterDevice(user.id, dto.deviceId);
+    return { success: true };
+  }
+  
+  @Get('list')
+  async getUserDevices(@CurrentUser() user: User): Promise<UserDevice[]> {
+    return this.deviceRegistrationService.getUserDevices(user.id);
+  }
+}
+
+// src/modules/push-notifications/controllers/push-notification.controller.ts
+@Controller('push-notifications')
+@UseGuards(AuthGuard)
+export class PushNotificationController {
+  constructor(
+    private readonly notificationSettingsService: NotificationSettingsService
+  ) {}
+  
+  @Get('settings')
+  async getNotificationSettings(@CurrentUser() user: User): Promise<NotificationSettings> {
+    return this.notificationSettingsService.getSettings(user.id);
+  }
+  
+  @Put('settings')
+  async updateNotificationSettings(
+    @Body() dto: UpdateNotificationSettingsDto,
+    @CurrentUser() user: User
+  ): Promise<NotificationSettings> {
+    return this.notificationSettingsService.updateSettings(user.id, dto);
+  }
+  
+  @Post('test')
+  async sendTestNotification(@CurrentUser() user: User): Promise<{ success: boolean }> {
+    await this.pushNotificationService.sendTestNotification(user.id);
+    return { success: true };
+  }
+}
+```
+
+#### **2. Integration với Messages Module:**
+```typescript
+// src/modules/messages/services/messages.service.ts
+@Injectable()
+export class MessagesService {
+  constructor(
+    private readonly pushNotificationService: PushNotificationService,
+    // ... other dependencies
+  ) {}
+  
+  async sendMessage(dto: CreateMessageDto, userContext: UserContext): Promise<MessageResponseDto> {
+    // Create message
+    const message = await this.createMessage(dto);
+    
+    // Get conversation participants
+    const participants = await this.getConversationParticipants(dto.conversationId);
+    
+    // Send push notifications to offline participants
+    const offlineParticipants = participants.filter(p => p.id !== userContext.userId);
+    
+    // Send push notifications asynchronously (don't block message sending)
+    setImmediate(async () => {
+      for (const participant of offlineParticipants) {
+        try {
+          await this.pushNotificationService.sendMessageNotification(
+            message.id,
+            userContext.userId,
+            participant.id,
+            dto.conversationId
+          );
+        } catch (error) {
+          console.error(`Failed to send push notification to ${participant.id}:`, error);
+        }
+      }
+    });
+    
+    return message;
+  }
+}
+```
+
+### **🎯 G. IMPLEMENTATION ROADMAP**
+
+#### **Phase 1: Backend Push Infrastructure (Week 1)**
+```typescript
+const phase1Tasks = [
+  'Setup PushNotificationsModule',
+  'Implement DeviceRegistrationService',
+  'Create Redis schemas for push data',
+  'Basic APNs/FCM integration',
+  'Device registration API endpoints'
+];
+```
+
+#### **Phase 2: Smart Notification Logic (Week 2)**
+```typescript
+const phase2Tasks = [
+  'Implement SmartNotificationService',
+  'Add notification settings management',
+  'Create conversation muting features',
+  'Add Do Not Disturb logic',
+  'Implement notification throttling'
+];
+```
+
+#### **Phase 3: Frontend Integration (Week 3)**
+```typescript
+const phase3Tasks = [
+  'Setup Expo push notifications',
+  'Create PushNotificationManager',
+  'Integrate with chat state management',
+  'Add notification interaction handlers',
+  'Implement badge count management'
+];
+```
+
+#### **Phase 4: Advanced Features (Week 4)**
+```typescript
+const phase4Tasks = [
+  'Rich notifications with actions',
+  'Web push notifications',
+  'Push notification analytics',
+  'A/B testing for notification content',
+  'Performance optimization'
+];
+```
+
+### **📊 H. PERFORMANCE CONSIDERATIONS**
+
+#### **1. Redis Optimization:**
+```typescript
+// Efficient Redis operations for push notifications
+const redisOptimizations = {
+  batchOperations: 'Use Redis pipelines for multiple operations',
+  smartCaching: 'Cache notification settings with appropriate TTL',
+  memoryManagement: 'Regular cleanup of old notification data',
+  indexing: 'Proper indexing for fast lookups'
+};
+```
+
+#### **2. Push Delivery Optimization:**
+```typescript
+// Optimize push notification delivery
+const deliveryOptimizations = {
+  batchSending: 'Group notifications for same user/conversation',
+  failureHandling: 'Exponential backoff for failed deliveries',
+  tokenManagement: 'Regular cleanup of invalid tokens',
+  prioritization: 'Priority queues for VIP notifications'
+};
+```
+
+**🚀 KEY TAKEAWAYS:**
+
+1. **Separate Push Module**: Create dedicated NestJS module for scalability
+2. **Smart Logic**: Use Redis for intelligent notification filtering
+3. **Multi-Platform**: Support iOS/Android/Web push notifications
+4. **Performance**: Async processing, batching, và smart caching
+5. **User Experience**: Respect user preferences và presence status
+6. **Analytics**: Track delivery rates và user engagement
+7. **Reliability**: Proper error handling và fallback mechanisms
+
+**Bạn muốn tôi implement module Push Notifications này cho project của bạn không?** 🔔
+
+---
+
+## 🧑‍💼 **ZALO USER MANAGEMENT ARCHITECTURE ANALYSIS**
+
+### **A. Core User Features (From Zalo App Analysis):**
+
+#### **1. Profile Management:**
+```typescript
+// Zalo's profile system has these key features:
+interface ZaloUserProfile {
+  // Basic Identity
+  phoneNumber: string;        // Primary identifier (verified)
+  displayName: string;        // Public display name
+  about?: string;             // Bio/status message
+  avatar?: string;            // Profile photo URL
+  coverPhoto?: string;        // Cover photo URL
+  
+  // Extended Profile
+  birthday?: Date;            // Birth date
+  gender?: 'male' | 'female' | 'other';
+  location?: string;          // Current location
+  occupation?: string;        // Job title/work
+  education?: string;         // Education info
+  
+  // Social Links
+  socialLinks?: {
+    facebook?: string;
+    instagram?: string;
+    tiktok?: string;
+    youtube?: string;
+  };
+  
+  // Account Settings
+  username?: string;          // Optional username (@handle)
+  email?: string;             // Optional email
+  isBusinessAccount: boolean; // Business vs personal
+  verificationBadge?: 'verified' | 'business' | null;
+}
+```
+
+#### **2. Privacy & Security Features:**
+```typescript
+// Zalo's privacy controls
+interface ZaloPrivacySettings {
+  // Profile Visibility
+  profilePhoto: 'everyone' | 'contacts' | 'nobody';
+  phoneNumber: 'everyone' | 'contacts' | 'nobody';
+  lastSeen: 'everyone' | 'contacts' | 'nobody';
+  about: 'everyone' | 'contacts' | 'nobody';
+  
+  // Communication Settings
+  whoCanMessageMe: 'everyone' | 'contacts' | 'nobody';
+  whoCanCallMe: 'everyone' | 'contacts' | 'nobody';
+  whoCanAddToGroups: 'everyone' | 'contacts' | 'admins_only';
+  
+  // Activity Settings
+  readReceipts: boolean;      // Show read receipts
+  typingIndicators: boolean;  // Show typing status
+  onlineStatus: boolean;      // Show online status
+  
+  // Security Features
+  twoFactorAuth: boolean;
+  loginAlerts: boolean;
+  appLock: {
+    enabled: boolean;
+    method: 'pin' | 'fingerprint' | 'face';
+  };
+}
+```
+
+#### **3. Contact & Social Features:**
+```typescript
+// Zalo's contact management
+interface ZaloContactFeatures {
+  // Contact Discovery
+  findByPhone: boolean;       // Allow finding by phone
+  findByEmail: boolean;       // Allow finding by email
+  findByUsername: boolean;    // Allow finding by username
+  suggestContacts: boolean;   // Suggest mutual contacts
+  
+  // Blocking & Restrictions
+  blockedUsers: string[];     // List of blocked user IDs
+  restrictedUsers: string[]; // Limited interaction users
+  
+  // Social Features
+  mutualFriends: string[];    // Shared connections
+  contactSync: boolean;       // Sync phone contacts
+  
+  // Business Features
+  followedPages: string[];    // Business pages followed
+  subscribedServices: string[]; // Zalo services subscribed
+}
+```
+
+#### **4. Device & Session Management:**
+```typescript
+// Zalo's multi-device support
+interface ZaloDeviceManagement {
+  devices: Array<{
+    deviceId: string;
+    deviceName: string;
+    platform: 'ios' | 'android' | 'web' | 'desktop';
+    lastActive: Date;
+    location?: string;
+    ipAddress: string;
+    isCurrentDevice: boolean;
+    pushToken?: string;
+  }>;
+  
+  // Session Settings
+  activeSessionsLimit: number;
+  logoutOtherDevices: () => Promise<void>;
+  
+  // Security Notifications
+  newDeviceAlerts: boolean;
+  suspiciousActivityAlerts: boolean;
+}
+```
+
+### **B. Missing APIs in Current Users Module:**
+
+Based on analysis, our Users module needs these additional APIs:
+
+#### **1. Profile Management APIs:**
+```typescript
+// Missing from current implementation:
+
+// GET /api/users/profile/:userId - Get user profile
+// PUT /api/users/profile - Update own profile
+// POST /api/users/avatar - Upload avatar
+// DELETE /api/users/avatar - Remove avatar
+// POST /api/users/cover-photo - Upload cover photo
+// DELETE /api/users/cover-photo - Remove cover photo
+
+// GET /api/users/public-profile/:userId - Get public profile (respects privacy)
+// GET /api/users/search - Search users (by name, username, phone)
+// GET /api/users/suggestions - Get contact suggestions
+```
+
+#### **2. Privacy & Settings APIs:**
+```typescript
+// Privacy Controls:
+// GET /api/users/privacy-settings - Get privacy settings
+// PUT /api/users/privacy-settings - Update privacy settings
+// GET /api/users/blocked-users - Get blocked users list
+// POST /api/users/block/:userId - Block a user
+// DELETE /api/users/block/:userId - Unblock a user
+
+// Security:
+// GET /api/users/security-settings - Get security settings
+// PUT /api/users/security-settings - Update security settings
+// POST /api/users/enable-2fa - Enable two-factor auth
+// DELETE /api/users/disable-2fa - Disable two-factor auth
+// GET /api/users/login-history - Get login history
+```
+
+#### **3. Device Management APIs:**
+```typescript
+// Device Sessions:
+// GET /api/users/devices - Get active devices
+// POST /api/users/device-token - Register device token
+// DELETE /api/users/devices/:deviceId - Logout specific device
+// DELETE /api/users/devices/all - Logout all other devices
+// PUT /api/users/devices/:deviceId - Update device info
+
+// Push Notifications:
+// PUT /api/users/notification-settings - Update notification preferences
+// POST /api/users/test-notification - Send test notification
+```
+
+#### **4. Contact & Social APIs:**
+```typescript
+// Contact Management:
+// POST /api/users/sync-contacts - Sync phone contacts
+// GET /api/users/contact-suggestions - Get contact suggestions
+// GET /api/users/mutual-friends/:userId - Get mutual connections
+
+// Discovery:
+// GET /api/users/find-by-phone/:phone - Find user by phone
+// GET /api/users/find-by-username/:username - Find user by username
+// POST /api/users/verify-phone - Verify phone number
+// POST /api/users/verify-email - Verify email address
+```
+
+#### **5. Account Management APIs:**
+```typescript
+// Account Status:
+// PUT /api/users/deactivate - Deactivate account
+// POST /api/users/reactivate - Reactivate account
+// DELETE /api/users/account - Delete account permanently
+
+// Data Export:
+// POST /api/users/export-data - Request data export
+// GET /api/users/export-status/:requestId - Check export status
+// GET /api/users/download-data/:requestId - Download exported data
+```
+
+### **C. Implementation Priority (Based on Zalo's Core Features):**
+
+#### **Phase 1 - Essential (Week 1):**
+1. ✅ Basic profile CRUD (already planned)
+2. 🔄 Profile photo upload/management
+3. 🔄 Privacy settings management
+4. 🔄 User search & discovery
+5. 🔄 Device token registration
+
+#### **Phase 2 - Social Features (Week 2):**
+1. 🔄 Contact blocking/unblocking
+2. 🔄 Contact suggestions
+3. 🔄 Phone contact sync
+4. 🔄 Public profile viewing (with privacy)
+
+#### **Phase 3 - Security (Week 3):**
+1. 🔄 Device session management
+2. 🔄 Two-factor authentication
+3. 🔄 Login history & alerts
+4. 🔄 Security settings
+
+#### **Phase 4 - Advanced (Week 4):**
+1. 🔄 Account deactivation/deletion
+2. 🔄 Data export functionality
+3. 🔄 Business account features
+4. 🔄 Advanced privacy controls
+
+### **D. Current Users Module Gap Analysis:**
+
+#### **✅ What We Have:**
+```typescript
+// Current implementation (minimal):
+class UsersService {
+  findById(id: string) // ✅ Basic user lookup
+}
+
+// Schema design (excellent):
+- UserCore: Basic identity & profile ✅
+- UserSettings: Privacy & preferences ✅  
+- UserDevice: Device management ✅
+- UserSecurity: Security features ✅
+
+// DTOs designed for:
+- CreateUserDto ✅
+- UpdateUserDto ✅  
+- FindUsersDto ✅
+- UserResponseDto ✅
+```
+
+#### **❌ What's Missing (Critical):**
+```typescript
+// Controller - completely empty!
+class UsersController {
+  // NO endpoints implemented
+}
+
+// Service - only 1 method!
+class UsersService {
+  findById() // Only this exists
+  // Missing 25+ essential methods
+}
+
+// Repository layer - not implemented
+// File upload handling - missing
+// Privacy enforcement - missing
+// Device management - missing
+// Security features - missing
+```
+
+### **E. Implementation Strategy:**
+
+#### **Phase 1: Foundation (1-2 days):**
+```typescript
+// 1. Complete basic CRUD operations
+// 2. Implement profile photo upload
+// 3. Add privacy settings management
+// 4. Create search & discovery APIs
+```
+
+#### **Phase 2: Social Layer (2-3 days):**
+```typescript
+// 1. Contact management (blocking/unblocking)
+// 2. User search with privacy respect
+// 3. Contact suggestions algorithm
+// 4. Phone number verification
+```
+
+#### **Phase 3: Security & Devices (2-3 days):**
+```typescript
+// 1. Device session management
+// 2. Push notification token handling
+// 3. Security settings & 2FA foundation
+// 4. Login history tracking
+```
+
+#### **Phase 4: Advanced Features (3-4 days):**
+```typescript
+// 1. Account management (deactivate/delete)
+// 2. Data export functionality
+// 3. Business account features
+// 4. Advanced privacy controls
+```
+
+**🎯 CRITICAL FINDING:**
+Your Users module has **excellent architecture** (modular schemas, clean DTOs) but **almost no implementation**. You need to build 25+ API endpoints to match Zalo's user management features.
+
+**Want me to start implementing these APIs following Zalo's patterns?** 🚀

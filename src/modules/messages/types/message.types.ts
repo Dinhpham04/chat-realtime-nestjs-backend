@@ -20,7 +20,7 @@ export enum MessageType {
   AUDIO = 'audio',
   FILE = 'file',
   LOCATION = 'location',
-  SYSTEM = 'system'
+  SYSTEM = 'system',
 }
 
 /**
