@@ -108,6 +108,7 @@ interface BatchShareFilesDto {
     filesMetadata?: Array<{
         fileId: string;
         fileName: string;
+        originalName?: string;
         fileSize: number;
         mimeType: string;
         downloadUrl: string;
@@ -123,6 +124,7 @@ interface QuickShareFileDto {
     message?: string;
     fileMetadata: {
         fileName: string;
+        originalName?: string; // Thêm originalName
         fileSize: number;
         mimeType: string;
         downloadUrl: string;
@@ -1128,6 +1130,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 fileInfo: {
                     id: data.fileId,
                     fileName: data.fileMetadata.fileName,
+                    originalName: data.fileMetadata.originalName, // Thêm originalName
                     fileSize: data.fileMetadata.fileSize,
                     mimeType: data.fileMetadata.mimeType,
                     downloadUrl: data.fileMetadata.downloadUrl,
@@ -1259,6 +1262,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                     const fileMetadata = {
                         fileId: fileId,
                         fileName: fileDetails.fileName,
+                        originalName: fileDetails.originalFilename, // Add originalName if available
                         fileSize: fileDetails.fileSize,
                         mimeType: fileDetails.mimeType,
                         downloadUrl: downloadUrl,
@@ -1294,6 +1298,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 attachments: filesMetadata.map(fileMetadata => ({
                     fileId: fileMetadata.fileId,
                     fileName: fileMetadata.fileName,
+                    originalName: fileMetadata.originalName,
                     fileSize: fileMetadata.fileSize,
                     mimeType: fileMetadata.mimeType,
                 })),
@@ -1334,6 +1339,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 filesInfo: filesMetadata.map(fileMetadata => ({
                     id: fileMetadata.fileId,
                     fileName: fileMetadata.fileName,
+                    originalName: fileMetadata.originalName, // Add originalName if available
                     fileSize: fileMetadata.fileSize,
                     mimeType: fileMetadata.mimeType,
                     downloadUrl: fileMetadata.downloadUrl,
