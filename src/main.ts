@@ -4,6 +4,11 @@ import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { setupSwagger } from './shared/utils/swagger/setupSwagger';
 import { GlobalExceptionFilter } from './shared/filters/global-exception.filter';
+import {
+  logNetworkConfiguration,
+  validateNetworkConnectivity,
+  isDevelopmentEnvironment
+} from './shared/utils/network/network-utils';
 
 /**
  * Bootstrap function - Application entry point
@@ -11,6 +16,7 @@ import { GlobalExceptionFilter } from './shared/filters/global-exception.filter'
  * - Documentation is Key: Complete Swagger setup
  * - Security First: Proper authentication documentation
  * - Performance: Optimized Swagger configuration
+ * - Mobile-First: Local network access for Expo Go development
  */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -32,23 +38,42 @@ async function bootstrap() {
   // Global exception filter - Senior Level Error Handling
   app.useGlobalFilters(new GlobalExceptionFilter());
 
-  // CORS
+  // Enhanced CORS for local development and mobile access
+  const corsConfig = configService.get('cors');
   app.enableCors({
-    origin: configService.get('cors.origin'),
-    credentials: true,
+    origin: corsConfig.origin,
+    credentials: corsConfig.credentials,
+    methods: corsConfig.methods,
+    allowedHeaders: corsConfig.allowedHeaders,
   });
+
+  // Log CORS configuration in development
+  if (isDevelopmentEnvironment()) {
+    console.log('🔐 CORS Origins configured:', corsConfig.origin);
+  }
 
   // Swagger Configuration - Senior Level Documentation
   setupSwagger(app, apiPrefix);
 
   const port = configService.get('port');
-  await app.listen(port);
-  console.log(
-    `🚀 Application is running on: http://localhost:${port}/${apiPrefix}`,
-  );
-  console.log(
-    `📚 Swagger documentation: http://localhost:${port}/${apiPrefix}/docs`,
-  );
+  const host = configService.get('host');
+
+  // Start server with configured host (0.0.0.0 for local network access)
+  await app.listen(port, host);
+
+  // Network configuration logging for development
+  logNetworkConfiguration(port, apiPrefix);
+
+  // Validate network connectivity in development
+  if (isDevelopmentEnvironment()) {
+    const isNetworkAccessible = await validateNetworkConnectivity(port);
+    if (!isNetworkAccessible) {
+      console.warn('⚠️  Warning: Network connectivity validation failed');
+      console.warn('   Mobile devices may not be able to connect');
+    } else {
+      console.log('✅ Network connectivity validated - Mobile access ready');
+    }
+  }
 }
 
 bootstrap();

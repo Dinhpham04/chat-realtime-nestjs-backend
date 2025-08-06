@@ -20,6 +20,17 @@ import { ConversationsService } from '../../modules/conversations/services/conve
 import { UsersService } from '../../modules/users/services/users.service';
 import { PresenceService } from '../../shared/services/presence.service';
 import { LastMessageService } from '../../shared/services/last-message.service';
+import { CallStateService } from '../../modules/calls/services/call-state.service';
+import { WebRTCSignalingService } from '../../modules/calls/services/webrtc-signaling.service';
+import {
+    CallInitiateDto,
+    CallAcceptDto,
+    CallDeclineDto,
+    CallHangupDto,
+    CallIceCandidateDto,
+    CallRenegotiateDto,
+    CallMediaStateDto
+} from '../../modules/calls/dto/webrtc-signaling.dto';
 import {
     UpdatePresenceDto,
     HeartbeatDto,
@@ -32,6 +43,7 @@ import {
 } from '../../shared/types/last-message.types';
 import { UserContext } from '../../modules/messages/interfaces/message-service.interface';
 import { CreateMessageDto, MessageResponseDto } from '../../modules/messages/dto';
+import { CallStatus } from '../../modules/calls/schemas/call.schema';
 
 // Constants for configuration
 const DEFAULT_MESSAGE_TIMEOUT = 30000; // 30 seconds
@@ -227,6 +239,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         private readonly usersService: UsersService,
         private readonly presenceService: PresenceService,
         private readonly lastMessageService: LastMessageService,
+        private readonly callStateService: CallStateService,
+        private readonly webRTCSignalingService: WebRTCSignalingService,
         private readonly eventEmitter: EventEmitter2,
     ) { }
 
@@ -364,6 +378,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             // Clear typing indicators for this user
             this.clearAllUserTyping(userId);
+
+            // Cleanup call state when user disconnects
+            await this.cleanupUserCallState(userId);
         }
 
         // Cleanup
@@ -2956,5 +2973,475 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }) {
         // Additional processing if needed
         this.logger.debug(`LastMessage read status updated for conversation ${event.conversationId}`);
+    }
+
+    // =============================================
+    // VOICE/VIDEO CALL SIGNALING EVENTS
+    // =============================================
+
+    /**
+     * WebRTC Call Initiation Handler
+     * 
+     * Handles SDP offer from client và initiates WebRTC call session.
+     * Uses WebRTCSignalingService for business logic và state management.
+     * 
+     * @param client - Socket client instance
+     * @param data - Call initiation data including SDP offer
+     */
+    @SubscribeMessage('call:initiate')
+    async handleCallInitiate(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: CallInitiateDto
+    ): Promise<void> {
+        try {
+            this.logger.log(`WebRTC call initiate from client ${client.id}`);
+
+            // Get authenticated user ID from socket
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                client.emit('call:error', {
+                    message: 'Authentication required',
+                    code: 'AUTH_REQUIRED'
+                });
+                return;
+            }
+
+            // Get user details
+            const user = await this.usersService.findById(userId);
+            if (!user) {
+                client.emit('call:error', {
+                    message: 'User not found',
+                    code: 'USER_NOT_FOUND'
+                });
+                return;
+            }
+
+            // Use WebRTCSignalingService for business logic
+            const { callId, callRecord, signalingData } = await this.webRTCSignalingService.initiateCall(
+                userId,
+                data
+            );
+
+            // Join call room for real-time signaling
+            await client.join(`call:${callId}`);
+
+            // Notify target user about incoming call via user room
+            this.server.to(`user:${data.targetUserId}`).emit('call:incoming', {
+                callId,
+                callerId: userId,
+                callerName: user.fullName || user.username,
+                callerAvatar: user.avatarUrl,
+                callType: data.callType,
+                sdpOffer: data.sdpOffer,
+                conversationId: data.conversationId
+            });
+
+            // Confirm to initiator
+            client.emit('call:initiated', {
+                callId,
+                status: 'ringing',
+                targetUserId: data.targetUserId,
+                callType: data.callType
+            });
+
+            this.logger.log(`WebRTC call initiated successfully: ${callId}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to initiate WebRTC call: ${error.message}`, error.stack);
+            client.emit('call:error', {
+                message: error.message || 'Failed to initiate call',
+                code: 'INITIATE_FAILED'
+            });
+        }
+    }
+
+    /**
+     * WebRTC Call Accept Handler
+     * 
+     * Handles SDP answer from client để accept incoming call.
+     * Uses WebRTCSignalingService for business logic và state management.
+     * 
+     * @param client - Socket client instance
+     * @param data - Call accept data including SDP answer
+     */
+    @SubscribeMessage('call:accept')
+    async handleCallAccept(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: CallAcceptDto
+    ): Promise<void> {
+        try {
+            this.logger.log(`WebRTC call accept from client ${client.id} for call ${data.callId}`);
+
+            // Get authenticated user ID from socket
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                client.emit('call:error', {
+                    message: 'Authentication required',
+                    code: 'AUTH_REQUIRED'
+                });
+                return;
+            }
+
+            // Use WebRTCSignalingService for business logic
+            const { callRecord, signalingData } = await this.webRTCSignalingService.acceptCall(
+                userId,
+                data
+            );
+
+            // Join call room for real-time signaling
+            await client.join(`call:${data.callId}`);
+
+            // Notify call initiator về SDP answer
+            this.server.to(`call:${data.callId}`).emit('call:accepted', {
+                callId: data.callId,
+                accepterId: userId,
+                sdpAnswer: data.sdpAnswer,
+                status: 'connected'
+            });
+
+            // Confirm to accepter
+            client.emit('call:accept_confirmed', {
+                callId: data.callId,
+                status: 'connected',
+                participants: callRecord.participants
+            });
+
+            this.logger.log(`WebRTC call accepted successfully: ${data.callId}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to accept WebRTC call: ${error.message}`, error.stack);
+            client.emit('call:error', {
+                message: error.message || 'Failed to accept call',
+                code: 'ACCEPT_FAILED'
+            });
+        }
+    }
+
+    /**
+     * WebRTC Call Decline Handler
+     * 
+     * Handles call decline và cleans up resources.
+     * Uses WebRTCSignalingService for business logic và state management.
+     * 
+     * @param client - Socket client instance
+     * @param data - Call decline data with reason
+     */
+    @SubscribeMessage('call:decline')
+    async handleCallDecline(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: CallDeclineDto
+    ): Promise<void> {
+        try {
+            this.logger.log(`WebRTC call declined from client ${client.id} for call ${data.callId}`);
+
+            // Get authenticated user ID from socket
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                client.emit('call:error', {
+                    message: 'Authentication required',
+                    code: 'AUTH_REQUIRED'
+                });
+                return;
+            }
+
+            // Use WebRTCSignalingService for business logic
+            const { callRecord } = await this.webRTCSignalingService.declineCall(
+                userId,
+                data
+            );
+
+            // Notify call initiator về call decline
+            this.server.to(`call:${data.callId}`).emit('call:declined', {
+                callId: data.callId,
+                declinerId: userId,
+                reason: data.reason || 'declined',
+                status: 'declined'
+            });
+
+            // Confirm to decliner
+            client.emit('call:decline_confirmed', {
+                callId: data.callId,
+                status: 'declined'
+            });
+
+            this.logger.log(`WebRTC call declined successfully: ${data.callId}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to decline WebRTC call: ${error.message}`, error.stack);
+            client.emit('call:error', {
+                message: error.message || 'Failed to decline call',
+                code: 'DECLINE_FAILED'
+            });
+        }
+    }
+
+    /**
+     * WebRTC Call Hangup Handler
+     * 
+     * Handles call hangup và ends call session.
+     * Uses WebRTCSignalingService for business logic và state management.
+     * 
+     * @param client - Socket client instance
+     * @param data - Call hangup data with reason
+     */
+    @SubscribeMessage('call:hangup')
+    async handleCallHangup(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: CallHangupDto
+    ): Promise<void> {
+        try {
+            this.logger.log(`WebRTC call hangup from client ${client.id} for call ${data.callId}`);
+
+            // Get authenticated user ID from socket
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                client.emit('call:error', {
+                    message: 'Authentication required',
+                    code: 'AUTH_REQUIRED'
+                });
+                return;
+            }
+
+            // Use WebRTCSignalingService for business logic
+            const { callRecord } = await this.webRTCSignalingService.hangupCall(
+                userId,
+                data
+            );
+
+            // Extract call duration from record
+            const callDuration = callRecord.duration || 0;
+
+            // Notify all participants that call ended
+            this.server.to(`call:${data.callId}`).emit('call:ended', {
+                callId: data.callId,
+                endedBy: userId,
+                reason: data.reason || 'hangup',
+                duration: callDuration,
+                status: 'ended'
+            });
+
+            // Remove all participants from call room
+            const sockets = await this.server.in(`call:${data.callId}`).fetchSockets();
+            for (const socket of sockets) {
+                await socket.leave(`call:${data.callId}`);
+            }
+
+            // Confirm to hangup initiator
+            client.emit('call:hangup_confirmed', {
+                callId: data.callId,
+                status: 'ended',
+                duration: callDuration
+            });
+
+            this.logger.log(`WebRTC call ended successfully: ${data.callId}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to hangup WebRTC call: ${error.message}`, error.stack);
+            client.emit('call:error', {
+                message: error.message || 'Failed to hangup call',
+                code: 'HANGUP_FAILED'
+            });
+        }
+    }
+
+    /**
+     * WebRTC ICE Candidate Handler
+     * 
+     * Handles ICE candidate exchange for WebRTC connectivity.
+     * Uses WebRTCSignalingService for business logic và state management.
+     * 
+     * @param client - Socket client instance
+     * @param data - ICE candidate data
+     */
+    @SubscribeMessage('call:ice_candidate')
+    async handleIceCandidate(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: CallIceCandidateDto
+    ): Promise<void> {
+        try {
+            this.logger.debug(`WebRTC ICE candidate from client ${client.id} for call ${data.callId}`);
+
+            // Get authenticated user ID from socket
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                client.emit('call:error', {
+                    message: 'Authentication required',
+                    code: 'AUTH_REQUIRED'
+                });
+                return;
+            }
+
+            // Use WebRTCSignalingService for business logic
+            await this.webRTCSignalingService.handleIceCandidate(
+                userId,
+                data
+            );
+
+            // Forward ICE candidate to other participants in call room
+            client.to(`call:${data.callId}`).emit('call:ice_candidate', {
+                callId: data.callId,
+                fromUserId: userId,
+                candidate: data.candidate
+            });
+
+            this.logger.debug(`WebRTC ICE candidate forwarded for call ${data.callId} from user ${userId}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to handle WebRTC ICE candidate: ${error.message}`, error.stack);
+            client.emit('call:error', {
+                message: error.message || 'Failed to process ICE candidate',
+                code: 'ICE_CANDIDATE_FAILED'
+            });
+        }
+    }
+
+    /**
+     * WebRTC Call Renegotiation Handler
+     * 
+     * Handles SDP renegotiation for media changes during call.
+     * Uses WebRTCSignalingService for business logic và state management.
+     * 
+     * @param client - Socket client instance
+     * @param data - Renegotiation data with new SDP offer
+     */
+    @SubscribeMessage('call:renegotiate')
+    async handleCallRenegotiate(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: CallRenegotiateDto
+    ): Promise<void> {
+        try {
+            this.logger.log(`WebRTC call renegotiation from client ${client.id} for call ${data.callId}`);
+
+            // Get authenticated user ID from socket
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                client.emit('call:error', {
+                    message: 'Authentication required',
+                    code: 'AUTH_REQUIRED'
+                });
+                return;
+            }
+
+            // Use WebRTCSignalingService for business logic
+            await this.webRTCSignalingService.handleRenegotiation(
+                userId,
+                data
+            );
+
+            // Forward renegotiation offer to other participants in call room
+            client.to(`call:${data.callId}`).emit('call:renegotiate', {
+                callId: data.callId,
+                fromUserId: userId,
+                sdpOffer: data.sdpOffer,
+                reason: data.reason
+            });
+
+            this.logger.log(`WebRTC call renegotiation forwarded for ${data.reason} from user ${userId} in call ${data.callId}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to handle WebRTC call renegotiation: ${error.message}`, error.stack);
+            client.emit('call:error', {
+                message: error.message || 'Failed to renegotiate call',
+                code: 'RENEGOTIATE_FAILED'
+            });
+        }
+    }
+
+    /**
+     * WebRTC Media State Update Handler
+     * 
+     * Handles media state changes during call (mute/unmute, video on/off).
+     * Uses WebRTCSignalingService for business logic và state management.
+     * 
+     * @param client - Socket client instance
+     * @param data - Media state data
+     */
+    @SubscribeMessage('call:media_state')
+    async handleMediaStateUpdate(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: CallMediaStateDto
+    ): Promise<void> {
+        try {
+            this.logger.debug(`WebRTC media state update from client ${client.id} for call ${data.callId}`);
+
+            // Get authenticated user ID from socket
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                client.emit('call:error', {
+                    message: 'Authentication required',
+                    code: 'AUTH_REQUIRED'
+                });
+                return;
+            }
+
+            // Use WebRTCSignalingService for business logic
+            await this.webRTCSignalingService.updateMediaState(
+                userId,
+                data
+            );
+
+            // Broadcast media state to other participants in call room
+            client.to(`call:${data.callId}`).emit('call:media_state_changed', {
+                callId: data.callId,
+                userId: userId,
+                audioEnabled: data.audioEnabled,
+                videoEnabled: data.videoEnabled,
+                screenSharingEnabled: data.screenSharingEnabled
+            });
+
+            this.logger.debug(`WebRTC media state updated for user ${userId} in call ${data.callId}: audio=${data.audioEnabled}, video=${data.videoEnabled}, screen=${data.screenSharingEnabled}`);
+
+        } catch (error) {
+            this.logger.error(`Failed to update WebRTC media state: ${error.message}`, error.stack);
+            client.emit('call:error', {
+                message: error.message || 'Failed to update media state',
+                code: 'MEDIA_STATE_FAILED'
+            });
+        }
+    }
+
+    // =============================================
+    // HELPER METHODS FOR CALLS
+    // =============================================
+
+    /**
+     * Generate unique call ID
+     */
+    private generateCallId(): string {
+        return `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    /**
+     * Clean up call state when user disconnects
+     */
+    private async cleanupUserCallState(userId: string): Promise<void> {
+        try {
+            // Get user's active calls
+            const activeCalls = await this.callStateService.getUserActiveCalls(userId);
+
+            for (const callId of activeCalls) {
+                // Notify other participants that user left
+                this.server.to(`call:${callId}`).emit('call:participant_left', {
+                    callId,
+                    userId,
+                    reason: 'disconnected'
+                });
+
+                // Remove user from call
+                await this.callStateService.removeParticipant(callId, userId);
+
+                // Check if call should be ended (no more participants)
+                const callState = await this.callStateService.getActiveCall(callId);
+                if (callState && callState.participants.length <= 1) {
+                    await this.callStateService.endCall(callId);
+                    this.server.to(`call:${callId}`).emit('call:ended', {
+                        callId,
+                        reason: 'all_participants_left'
+                    });
+                }
+            }
+        } catch (error) {
+            this.logger.error(`Failed to cleanup call state for user ${userId}: ${error.message}`, error.stack);
+        }
     }
 }
