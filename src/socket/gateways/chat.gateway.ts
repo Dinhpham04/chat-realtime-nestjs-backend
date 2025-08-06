@@ -1103,6 +1103,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // Broadcast file message to conversation (using provided metadata)
             const senderName = await this.getUserDisplayName(userId);
             const messageData = {
+                localId: `quickfile_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 id: message.id,
                 conversationId: message.conversationId,
                 senderId: message.senderId,
