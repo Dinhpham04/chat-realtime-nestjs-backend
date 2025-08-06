@@ -19,6 +19,7 @@ import {
 } from './shared';
 import { FriendsModule } from './modules/friends/friends.module';
 import { FilesModule } from './modules/files/files.module';
+import { CallsModule } from './modules/calls/calls.module';
 import { SocketModule } from './socket/socket.module';
 
 @Module({
@@ -44,6 +45,7 @@ import { SocketModule } from './socket/socket.module';
     ConversationsModule,
     FriendsModule,
     FilesModule,
+    CallsModule,
   ],
   controllers: [AppController],
   providers: [

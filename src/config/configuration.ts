@@ -1,5 +1,8 @@
+import { getServerHost, getCorsOrigins } from '../shared/utils/network/network-utils';
+
 export default () => ({
   port: Number(process.env.PORT) || 3000,
+  host: getServerHost(), // Dynamic host based on environment
   apiPrefix: process.env.API_PREFIX || 'api/v1',
 
   database: {
@@ -31,7 +34,17 @@ export default () => ({
     ],
   },
 
+  // Enhanced CORS configuration for local development
   cors: {
-    origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
+    origin: getCorsOrigins(), // Dynamic CORS origins including local network
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  },
+
+  // Network configuration for voice/video calls
+  network: {
+    localDevelopment: process.env.NODE_ENV === 'development' || !process.env.NODE_ENV,
+    enableNetworkLogging: process.env.ENABLE_NETWORK_LOGGING === 'true',
   },
 });

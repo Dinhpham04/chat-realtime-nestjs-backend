@@ -7,6 +7,7 @@ import { UsersModule } from '../modules/users/users.module';
 import { ConversationsModule } from '../modules/conversations/conversations.module';
 import { MessagesModule } from '../modules/messages/messages.module';
 import { FilesModule } from '../modules/files/files.module';
+import { CallsModule } from '../modules/calls/calls.module';
 import { PresenceModule } from '../shared/modules/presence.module';
 import { ChatGateway } from './gateways/chat.gateway';
 // import { FileUploadGateway } from './gateways/file-upload.gateway';
@@ -30,6 +31,7 @@ import { LastMessageService } from 'src/shared/services/last-message.service';
         ConversationsModule,
         MessagesModule,
         FilesModule,
+        CallsModule,
         PresenceModule,
     ],
     controllers: [SocketController],

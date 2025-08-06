@@ -1,16 +1,33 @@
 import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ExecutionContext } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 
 /**
  * JWT Authentication Guard
  * Protects routes that require valid JWT access token
+ * Supports @Public() decorator to bypass authentication
  */
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') { // extends Passport's AuthGuard with strategy 'jwt'
   private readonly logger = new Logger(JwtAuthGuard.name);
 
+  constructor(private reflector: Reflector) {
+    super();
+  }
+
   canActivate(context: ExecutionContext) { // called first when route is accessed
+    // Check if route is marked as public
+    const isPublic = this.reflector.getAllAndOverride<boolean>('isPublic', [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    if (isPublic) {
+      this.logger.log('Route is public, skipping authentication');
+      return true;
+    }
+
     // Add any additional logic here if needed
     // optional: checking ip is allowed, rate limiting, etc.
     return super.canActivate(context); // call passport's jwt strategy
