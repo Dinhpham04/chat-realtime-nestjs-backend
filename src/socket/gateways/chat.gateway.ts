@@ -48,6 +48,7 @@ import { CallStatus } from '../../modules/calls/schemas/call.schema';
 // Constants for configuration
 const DEFAULT_MESSAGE_TIMEOUT = 30000; // 30 seconds
 const MAX_RETRY_ATTEMPTS = 3;
+const CALL_TIMEOUT = 30000; // 30 seconds for incoming call timeout
 const DELIVERY_BATCH_SIZE = 50;
 
 // Typing indicator constants
@@ -230,6 +231,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }>>(); // conversationId -> Map<userId, typingInfo>
     private readonly userTypingTimeouts = new Map<string, NodeJS.Timeout>(); // userId -> timeoutId
 
+    // Call timeout tracking
+    private readonly callTimeouts = new Map<string, NodeJS.Timeout>(); // callId -> timeoutId
+
     constructor(
         private readonly socketAuthService: SocketAuthService,
         private readonly messageQueueService: MessageQueueService,
@@ -302,6 +306,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             // Join user to personal room
             await client.join(`user:${user.userId}`);
+            this.logger.log(`✅ User ${user.userId} joined personal room: user:${user.userId}`);
 
             // Join user's conversations
             const conversations = await this.getUserConversations(user.userId);
@@ -3031,6 +3036,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // Join call room for real-time signaling
             await client.join(`call:${callId}`);
 
+            this.logger.log(`📞 Emitting call:incoming to user:${data.targetUserId} room`);
+
             // Notify target user about incoming call via user room
             this.server.to(`user:${data.targetUserId}`).emit('call:incoming', {
                 callId,
@@ -3042,6 +3049,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 conversationId: data.conversationId
             });
 
+            this.logger.log(`✅ call:incoming event emitted to user:${data.targetUserId}`);
+
             // Confirm to initiator
             client.emit('call:initiated', {
                 callId,
@@ -3049,6 +3058,40 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 targetUserId: data.targetUserId,
                 callType: data.callType
             });
+
+            // Set call timeout to auto-cancel if not answered
+            const timeoutId = setTimeout(async () => {
+                try {
+                    this.logger.log(`Call timeout for ${callId} - auto cancelling`);
+
+                    // Check if call is still in ringing state
+                    const currentCall = await this.callStateService.getActiveCall(callId);
+                    if (currentCall && currentCall.status === CallStatus.INITIATING) {
+                        // End the call due to timeout
+                        await this.webRTCSignalingService.hangupCall(userId, {
+                            callId,
+                            reason: 'timeout'
+                        });
+
+                        // Notify both users about timeout
+                        this.server.to(`call:${callId}`).emit('call:timeout', {
+                            callId,
+                            reason: 'No answer'
+                        });
+
+                        // Clean up call room
+                        this.server.in(`call:${callId}`).socketsLeave(`call:${callId}`);
+                    }
+                } catch (error) {
+                    this.logger.error(`Failed to handle call timeout for ${callId}: ${error.message}`);
+                } finally {
+                    // Remove timeout reference
+                    this.callTimeouts.delete(callId);
+                }
+            }, CALL_TIMEOUT);
+
+            // Store timeout reference for cleanup
+            this.callTimeouts.set(callId, timeoutId);
 
             this.logger.log(`WebRTC call initiated successfully: ${callId}`);
 
@@ -3093,6 +3136,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 userId,
                 data
             );
+
+            // Clear call timeout since call was answered
+            const timeoutId = this.callTimeouts.get(data.callId);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                this.callTimeouts.delete(data.callId);
+                this.logger.debug(`Cleared call timeout for accepted call: ${data.callId}`);
+            }
 
             // Join call room for real-time signaling
             await client.join(`call:${data.callId}`);
@@ -3156,6 +3207,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 data
             );
 
+            // Clear call timeout since call was declined
+            const timeoutId = this.callTimeouts.get(data.callId);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                this.callTimeouts.delete(data.callId);
+                this.logger.debug(`Cleared call timeout for declined call: ${data.callId}`);
+            }
+
             // Notify call initiator về call decline
             this.server.to(`call:${data.callId}`).emit('call:declined', {
                 callId: data.callId,
@@ -3214,6 +3273,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 data
             );
 
+            // Clear call timeout since call was ended
+            const timeoutId = this.callTimeouts.get(data.callId);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                this.callTimeouts.delete(data.callId);
+                this.logger.debug(`Cleared call timeout for ended call: ${data.callId}`);
+            }
+
             // Extract call duration from record
             const callDuration = callRecord.duration || 0;
 
@@ -3265,7 +3332,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         @MessageBody() data: CallIceCandidateDto
     ): Promise<void> {
         try {
-            this.logger.debug(`WebRTC ICE candidate from client ${client.id} for call ${data.callId}`);
+            this.logger.debug(`WebRTC ICE candidate from client ${client.id}, data:`, data);
 
             // Get authenticated user ID from socket
             const userId = this.socketToUser.get(client.id);
@@ -3277,20 +3344,44 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 return;
             }
 
+            // Validate callId exists
+            if (!data.callId) {
+                this.logger.error(`ICE candidate failed: callId is missing`, data);
+                client.emit('call:error', {
+                    message: 'Call ID is required',
+                    code: 'MISSING_CALL_ID'
+                });
+                return;
+            }
+
+            this.logger.debug(`Processing ICE candidate for call ${data.callId} from user ${userId}`);
+
             // Use WebRTCSignalingService for business logic
-            await this.webRTCSignalingService.handleIceCandidate(
-                userId,
-                data
-            );
+            try {
+                await this.webRTCSignalingService.handleIceCandidate(
+                    userId,
+                    data
+                );
 
-            // Forward ICE candidate to other participants in call room
-            client.to(`call:${data.callId}`).emit('call:ice_candidate', {
-                callId: data.callId,
-                fromUserId: userId,
-                candidate: data.candidate
-            });
+                // Forward ICE candidate to other participants in call room
+                client.to(`call:${data.callId}`).emit('call:ice_candidate', {
+                    callId: data.callId,
+                    fromUserId: userId,
+                    candidate: data.candidate
+                });
 
-            this.logger.debug(`WebRTC ICE candidate forwarded for call ${data.callId} from user ${userId}`);
+                this.logger.debug(`WebRTC ICE candidate forwarded for call ${data.callId} from user ${userId}`);
+
+            } catch (serviceError) {
+                // Check if this is a "call not found" error which is expected after timeout
+                if (serviceError.message && serviceError.message.includes('not found')) {
+                    this.logger.debug(`ICE candidate for ended call ${data.callId} from user ${userId} - gracefully ignored`);
+                    return; // Don't emit error to client for ended calls
+                }
+
+                // Re-throw other errors
+                throw serviceError;
+            }
 
         } catch (error) {
             this.logger.error(`Failed to handle WebRTC ICE candidate: ${error.message}`, error.stack);
@@ -3426,6 +3517,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             const activeCalls = await this.callStateService.getUserActiveCalls(userId);
 
             for (const callId of activeCalls) {
+                // Clear call timeout if exists
+                const timeoutId = this.callTimeouts.get(callId);
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    this.callTimeouts.delete(callId);
+                    this.logger.debug(`Cleared call timeout for disconnected user call: ${callId}`);
+                }
+
                 // Notify other participants that user left
                 this.server.to(`call:${callId}`).emit('call:participant_left', {
                     callId,

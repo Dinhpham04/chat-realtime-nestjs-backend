@@ -124,7 +124,8 @@ export function getCorsOrigins(): string[] {
       'http://localhost:19000',
       'http://localhost:19001',
       'http://192.168.0.101:8081',
-      'http://127.0.0.1:5500'
+      'http://127.0.0.1:5500',
+      'http://192.168.0.104:5500'
     ];
 
     return [...baseOrigins, ...localNetworkOrigins];

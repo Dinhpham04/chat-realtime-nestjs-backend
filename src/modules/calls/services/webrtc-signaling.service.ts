@@ -285,8 +285,24 @@ export class WebRTCSignalingService {
     try {
       this.logger.debug(`Handling ICE candidate for call ${candidateData.callId} from user ${userId}`);
 
+      // Validate callId parameter
+      if (!candidateData.callId) {
+        throw new BadRequestException('Call ID is required');
+      }
+
       // Validate call exists và user is participant
-      await this.validateCallParticipation(candidateData.callId, userId);
+      // Use try-catch to handle the case where call might have been cleaned up
+      try {
+        await this.validateCallParticipation(candidateData.callId, userId);
+      } catch (error) {
+        if (error.message.includes('not found')) {
+          // Log warning but don't throw - call might have ended/timeout
+          this.logger.warn(`ICE candidate for ended/non-existent call ${candidateData.callId} from user ${userId} - ignoring`);
+          return; // Gracefully ignore ICE candidates for ended calls
+        }
+        // Re-throw other validation errors
+        throw error;
+      }
 
       // Store ICE candidate in Redis with short TTL
       await this.storeIceCandidate(candidateData.callId, userId, candidateData.candidate);
@@ -410,10 +426,24 @@ export class WebRTCSignalingService {
   }
 
   private async validateCallParticipation(callId: string, userId: string): Promise<CallDocument> {
+    // Add validation for callId parameter
+    if (!callId) {
+      this.logger.error(`validateCallParticipation: callId is null or undefined for user ${userId}`);
+      throw new BadRequestException('Call ID is required');
+    }
+
+    this.logger.debug(`Validating call participation: callId=${callId}, userId=${userId}`);
+
     const callRecord = await this.callModel.findOne({
       callId,
       'participants.userId': userId
     }).exec();
+
+    this.logger.debug(`Call record found:`, callRecord ? {
+      callId: callRecord.callId,
+      status: callRecord.status,
+      participants: callRecord.participants?.map(p => p.userId)
+    } : null);
 
     if (!callRecord) {
       throw new NotFoundException(`Call ${callId} not found or user not participant`);

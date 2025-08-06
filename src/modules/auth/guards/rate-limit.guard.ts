@@ -16,7 +16,7 @@ export class RateLimitGuard implements CanActivate {
 
   // Default rate limits for different endpoints
   private readonly defaultLimits = {
-    '/auth/login': { requests: 5, window: 15 * 60 }, // 5 requests per 15 minutes
+    '/auth/login': { requests: 50, window: 15 * 60 }, // 5 requests per 15 minutes
     '/auth/register': { requests: 3, window: 60 * 60 }, // 3 requests per hour
     '/auth/refresh-token': { requests: 10, window: 5 * 60 }, // 10 requests per 5 minutes
     'default': { requests: 20, window: 15 * 60 }, // 20 requests per 15 minutes
