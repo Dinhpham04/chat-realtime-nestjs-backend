@@ -48,6 +48,7 @@ import {
     UserFilesResponseDto
 } from '../dto/file.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { getAllowedMimeTypes } from '../constants';
 import { JwtUser } from '../../auth/interfaces/jwt-payload.interface';
 import { FILE_CONSTANTS } from '../constants/file.constants';
 import { RedisDownloadTokenService } from '../../../redis/services/redis-download-token.service';
@@ -108,11 +109,21 @@ export class FilesController {
         Upload a single file with automatic validation, deduplication, and secure storage.
         
         **Supported File Types:**
-        - Images: JPEG, PNG, GIF, WebP (max 50MB)
-        - Videos: MP4, AVI, MOV, WMV (max 500MB)
-        - Documents: PDF, DOC, DOCX, XLS, XLSX (max 100MB)
-        - Audio: MP3, WAV, MPEG (max 50MB)
-        - Archives: ZIP, RAR (max 100MB)
+        - **Images:** JPEG, JPG, PNG, GIF, WebP, BMP, TIFF, SVG, ICO, HEIC, HEIF, AVIF (max 50MB)
+        - **Videos:** MP4, AVI, MOV, WMV, QuickTime, WebM, OGG, 3GP, FLV, MKV, M4V (max 500MB)
+        - **Audio:** MP3, WAV, MPEG, MP4, AAC, OGG, WebM, FLAC, WMA, AMR, 3GP (max 50MB)
+        - **Documents:** 
+          * PDF files
+          * Microsoft Office: DOC, DOCX, XLS, XLSX, PPT, PPTX, Access, Project
+          * LibreOffice/OpenOffice: ODT, ODS, ODP, ODG, ODB, ODF
+          * Text: TXT, CSV, RTF, HTML, XHTML
+          * E-books: EPUB, MOBI, AZW, iBooks
+        - **Archives:** ZIP, RAR, 7Z, TAR, GZIP, BZIP2, LZH (max 100MB)
+        - **Development:** JavaScript, CSS, JSON, XML, Python, Java, C/C++, C#, PHP, SQL, Shell scripts
+        - **Fonts:** TTF, OTF, WOFF, WOFF2, EOT
+        - **CAD/Design:** DWG, DXF, AutoCAD files
+        - **3D Models:** OBJ, FBX, GLTF files
+        - **Others:** SQLite, APK, DEB, RPM packages
         
         **Features:**
         - Automatic file deduplication (same file won't be stored twice)
@@ -173,7 +184,7 @@ export class FilesController {
                 success: false,
                 error: 'Unsupported file type: text/plain',
                 code: 'VALIDATION_FAILED',
-                message: 'Only images, videos, documents, audio and archives are allowed'
+                message: 'Supported file types: images, videos, audio, documents, archives, development files, fonts, CAD/design files, 3D models and more. Check API documentation for complete list.'
             }
         }
     })
@@ -195,19 +206,7 @@ export class FilesController {
             },
             fileFilter: (req, file, callback) => {
                 // Basic MIME type check - detailed validation in service
-                const allowedMimes = [
-                    // Images
-                    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
-                    // Videos  
-                    'video/mp4', 'video/avi', 'video/mov', 'video/wmv',
-                    // Documents
-                    'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                    'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    // Audio
-                    'audio/mpeg', 'audio/wav', 'audio/mp3',
-                    // Archives
-                    'application/zip', 'application/x-rar-compressed',
-                ];
+                const allowedMimes = getAllowedMimeTypes();
 
                 if (allowedMimes.includes(file.mimetype)) {
                     callback(null, true);
@@ -344,6 +343,16 @@ export class FilesController {
         FilesInterceptor('files', 10, {
             limits: {
                 fileSize: FILE_CONSTANTS.GLOBAL_MAX_FILE_SIZE,
+            },
+            fileFilter: (req, file, callback) => {
+                // Basic MIME type check - detailed validation in service
+                const allowedMimes = getAllowedMimeTypes();
+
+                if (allowedMimes.includes(file.mimetype)) {
+                    callback(null, true);
+                } else {
+                    callback(new BadRequestException(`Unsupported file type: ${file.mimetype}`), false);
+                }
             },
         }),
     )
