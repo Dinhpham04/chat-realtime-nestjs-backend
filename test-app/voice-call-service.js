@@ -28,24 +28,47 @@ class VoiceCallService {
     this.isMuted = false;
     this.isSpeakerOn = false;
 
-    // ICE Candidate Queue (for candidates generated before callId is available)
+    // ICE Candidate Queue (for candidates generated before callId or remote description is available)
     this.iceCandidateQueue = [];
+    this.remoteIceCandidateQueue = [];
 
     // Audio Context for visualization
     this.audioContext = null;
     this.localAnalyzer = null;
     this.remoteAnalyzer = null;
 
-    // Configuration
+    // Configuration with enhanced ICE settings for LAN connectivity
     this.config = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
       ],
       iceTransportPolicy: 'all',
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
-      iceCandidatePoolSize: 10
+      iceCandidatePoolSize: 10,
+      // Extended ICE gathering timeout for LAN connections
+      iceGatheringTimeout: 30000,  // 30 seconds instead of default 15
+      // Prefer IPv4 and avoid virtual interfaces like WSL
+      iceCheckingTimeout: 20000,
+      // Additional configuration for better LAN connectivity
+      enableCpuOveruseDetection: false,
+      // Force ICE to use proper IP addresses for LAN
+      enableDscp: true,
+      // Enhanced SDP semantics for LAN connections
+      sdpSemantics: 'unified-plan',
+      // Force to only use valid network interfaces
+      rtcpMuxPolicy: 'require',
+      // Reduce DTLS fingerprint to force better candidate selection
+      enableDtlsSrtp: true,
+      // Port range configuration to avoid reserved ports
+      portRange: {
+        min: 10000,  // Start from port 10000
+        max: 20000   // End at port 20000
+      }
     };
 
     // Event callbacks (will be set by UI)
@@ -56,6 +79,96 @@ class VoiceCallService {
     this.onDebugUpdate = null;
 
     this.log('info', 'VoiceCallService initialized');
+
+    // Analyze network configuration on startup
+    setTimeout(() => {
+      this.analyzeNetworkConfig();
+    }, 1000);
+  }
+
+  /**
+   * Analyze local network configuration for debugging
+   */
+  async analyzeNetworkConfig() {
+    try {
+      this.log('info', '🔍 Analyzing local network configuration...');
+
+      // Get local IP using WebRTC
+      const tempPc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      const localIPs = [];
+
+      return new Promise((resolve) => {
+        tempPc.onicecandidate = (event) => {
+          if (event.candidate) {
+            const candidate = event.candidate;
+            if (candidate.type === 'host' && candidate.address) {
+              const ip = candidate.address;
+              if (!localIPs.includes(ip)) {
+                localIPs.push(ip);
+
+                // Analyze IP type
+                let ipType = 'Unknown';
+                if (ip.startsWith('192.168.')) ipType = 'LAN (Class C Private)';
+                else if (ip.startsWith('10.')) ipType = 'LAN (Class A Private)';
+                else if (ip.startsWith('172.')) {
+                  const secondOctet = parseInt(ip.split('.')[1]);
+                  if (secondOctet >= 16 && secondOctet <= 31) {
+                    ipType = 'Virtual (Docker/WSL)';
+                  } else {
+                    ipType = 'LAN (Class B Private)';
+                  }
+                }
+                else if (ip.startsWith('169.254.')) ipType = 'Link-Local (APIPA)';
+                else if (ip === '127.0.0.1') ipType = 'Localhost';
+                else ipType = 'Public/Other';
+
+                this.log('info', `🌐 Detected interface: ${ip} (${ipType}) - Protocol: ${candidate.protocol}`);
+              }
+            }
+          } else {
+            // ICE gathering complete
+            tempPc.close();
+            this.log('success', `✅ Network analysis complete. Found ${localIPs.length} local interfaces`);
+
+            // Provide recommendations
+            const lanIPs = localIPs.filter(ip =>
+              ip.startsWith('192.168.') ||
+              ip.startsWith('10.') ||
+              (ip.startsWith('172.') && !this.isWSLInterface(ip))
+            );
+
+            if (lanIPs.length > 0) {
+              this.log('success', `🎯 Best IPs for LAN calling: ${lanIPs.join(', ')}`);
+            } else {
+              this.log('warning', '⚠️ No suitable LAN interfaces found for peer-to-peer calling');
+            }
+
+            resolve(localIPs);
+          }
+        };
+
+        // Create a dummy data channel to trigger ICE gathering
+        tempPc.createDataChannel('test');
+        tempPc.createOffer().then(offer => tempPc.setLocalDescription(offer));
+      });
+
+    } catch (error) {
+      this.log('error', `❌ Network analysis failed: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Check if IP is WSL interface
+   */
+  isWSLInterface(ip) {
+    if (!ip.startsWith('172.')) return false;
+    const parts = ip.split('.');
+    const secondOctet = parseInt(parts[1]);
+    return secondOctet >= 16 && secondOctet <= 31;
   }
 
   /**
@@ -155,7 +268,7 @@ class VoiceCallService {
     this.socket.on('call:initiated', (data) => {
       this.log('success', `Call initiated successfully: ${data.callId}`);
       this.currentCallId = data.callId;
-
+      console.debug('📞 Call initiated:', data);
       // Send any queued ICE candidates
       this.flushIceCandidateQueue();
 
@@ -165,39 +278,108 @@ class VoiceCallService {
     this.socket.on('call:incoming', (data) => {
       this.log('success', `📞 INCOMING CALL RECEIVED! From ${data.callerId}: ${data.callId}`);
       this.log('debug', `Incoming call data:`, JSON.stringify(data, null, 2));
+      console.debug('📞 Incoming call data:', data);
       this.handleIncomingCall(data);
     });
 
     this.socket.on('call:accepted', (data) => {
       this.log('success', `Call accepted: ${data.callId}`);
+      console.debug('📞 Call accepted data:', data);
       this.handleCallAccepted(data);
+    });
+
+    this.socket.on('call:accept_confirmed', (data) => {
+      this.log('success', `Call accept confirmed: ${data.callId}`);
+      console.debug('📞 Call accept confirmed data:', data);
+      this.handleCallAcceptConfirmed(data);
     });
 
     this.socket.on('call:declined', (data) => {
       this.log('warning', `Call declined: ${data.callId}`);
+      console.debug('📞 Call declined data:', data);
       this.handleCallDeclined(data);
     });
 
     this.socket.on('call:ended', (data) => {
       this.log('info', `Call ended: ${data.callId}`);
+      console.debug('📞 Call ended data:', data);
       this.handleCallHangup(data);
     });
 
     this.socket.on('call:timeout', (data) => {
       this.log('warning', `Call timeout: ${data.callId} - ${data.reason}`);
+      console.debug('📞 Call timeout data:', data);
       this.handleCallHangup(data);
     });
 
     this.socket.on('call:ice_candidate', (data) => {
-      this.log('debug', `ICE candidate received: ${data.callId}`);
+      if (!data.callId || !data.candidate) {
+        this.log('error', 'Received invalid ICE candidate data:', data);
+        return;
+      }
+      console.debug(' 📨 ICE candidate received from remote peer for call:', data);
+      this.log('info', `🧊 ICE candidate received from remote peer for call: ${data.callId}`);
+      this.log('debug', `   ├─ Candidate type: ${data.candidate?.type || 'unknown'}`);
+      this.log('debug', `   ├─ Protocol: ${data.candidate?.protocol || 'unknown'}`);
+      this.log('debug', `   ├─ Address: ${data.candidate?.address || 'unknown'}`);
+      this.log('debug', `   ├─ Port: ${data.candidate?.port || 'unknown'}`);
+      this.log('debug', `   └─ Current call: ${this.currentCallId}`);
+
+      // DETAILED CONSOLE LOG for debugging
+      console.log('📨 RECEIVED REMOTE ICE CANDIDATE:', {
+        callId: data.callId,
+        currentCallId: this.currentCallId,
+        isInitiator: this.isInitiator,
+        callState: this.callState,
+        hasRemoteDescription: !!this.peerConnection?.remoteDescription,
+        candidate: {
+          type: data.candidate?.type,
+          protocol: data.candidate?.protocol,
+          address: data.candidate?.address,
+          port: data.candidate?.port,
+          priority: data.candidate?.priority,
+          foundation: data.candidate?.foundation,
+          candidateString: data.candidate?.candidate,
+          usernameFragment: data.candidate?.usernameFragment,
+          sdpMid: data.candidate?.sdpMid,
+          sdpMLineIndex: data.candidate?.sdpMLineIndex
+        },
+        peerConnectionState: {
+          iceConnectionState: this.peerConnection?.iceConnectionState,
+          signalingState: this.peerConnection?.signalingState,
+          connectionState: this.peerConnection?.connectionState
+        }
+      });
+
+      if (data.callId !== this.currentCallId) {
+        this.log('warning', `❌ ICE candidate for wrong call ID: ${data.callId} vs ${this.currentCallId}`);
+        console.log('❌ IGNORED REMOTE CANDIDATE - Wrong Call ID:', {
+          receivedCallId: data.callId,
+          currentCallId: this.currentCallId
+        });
+        return;
+      }
+
       this.handleIceCandidate(data);
     });
 
+    this.socket.on('call:renegotiate', (data) => {
+      console.debug('📡 Renegotiation offer received:', data);
+      this.log('info', `📡 Renegotiation offer received: ${data.callId}`);
+      this.handleRenegotiation(data);
+    });
+
     this.socket.on('call:error', (data) => {
+      console.debug('📞 Call error data:', data);
       this.log('error', `Call error: ${data.message} (${data.code})`);
       if (this.onError) {
         this.onError(data);
       }
+    });
+
+    this.socket.on('call:room_joined', (data) => {
+      this.log('success', `✅ Successfully joined call room: ${data.callId}`);
+      console.debug('📞 Call room joined:', data);
     });
   }
 
@@ -271,8 +453,13 @@ class VoiceCallService {
         offerToReceiveVideo: false
       });
 
+      console.log('📞 Creating SDP offer:', offer);
+
       await this.peerConnection.setLocalDescription(offer);
       this.log('debug', 'Local description (offer) set');
+
+      // Validate and log our offer SDP for debugging
+      this.validateAndLogSDP(offer, 'Local Offer');
 
       // Send offer to server
       this.socket.emit('call:initiate', {
@@ -296,9 +483,10 @@ class VoiceCallService {
    */
   async answerCall(callData) {
     try {
+      console.debug(`📞 CALL DATA RECEIVE`, callData);
       this.log('info', `Answering call: ${callData.callId}`);
       this.currentCallId = callData.callId;
-      this.callState = 'active';
+      this.callState = 'connecting'; // Use connecting state while setting up
       this.isInitiator = false;
 
       // Get user media
@@ -314,18 +502,37 @@ class VoiceCallService {
 
       // Set remote description (offer)
       await this.peerConnection.setRemoteDescription(callData.sdpOffer);
-      this.log('debug', 'Remote description (offer) set');
+      this.log('debug', '📡 Remote description (offer) set successfully');
+
+      // Validate and log SDP for debugging
+      this.validateAndLogSDP(callData.sdpOffer, 'Remote Offer');
+
+      // Process any queued remote ICE candidates IMMEDIATELY after setting remote description
+      console.log('📨 Processing queued remote ICE candidates... answers');
+      await this.flushRemoteIceCandidateQueue();
 
       // Create and send answer
       const answer = await this.peerConnection.createAnswer();
+      console.log('📞 Creating SDP answer:', answer);
+
       await this.peerConnection.setLocalDescription(answer);
       this.log('debug', 'Local description (answer) set');
+
+      // Validate and log our answer SDP for debugging
+      this.validateAndLogSDP(answer, 'Local Answer');
 
       // Send answer to server
       this.socket.emit('call:accept', {
         callId: this.currentCallId,
         sdpAnswer: answer
       });
+
+      this.log('debug', 'Call accept sent to server');
+
+      // Double-check for any additional remote ICE candidates that arrived
+      setTimeout(async () => {
+        await this.flushRemoteIceCandidateQueue();
+      }, 100);
 
       this.updateDebugInfo();
       this.notifyStateChange();
@@ -402,6 +609,158 @@ class VoiceCallService {
   }
 
   /**
+   * Validate and log SDP for debugging purposes
+   */
+  validateAndLogSDP(sdp, type) {
+    try {
+      this.log('info', `🔍 Analyzing ${type} SDP...`);
+
+      const sdpText = sdp.sdp || sdp;
+      const lines = sdpText.split('\n');
+
+      // Check for common issues
+      let issues = [];
+      let warnings = [];
+      let hasValidIP = false;
+      let audioPort = null;
+      let connectionIP = null;
+      let originIP = null;
+
+      lines.forEach((line, index) => {
+        console.debug(`Analyzing line ${index + 1}: ${line}`);
+        // Check origin line
+        if (line.startsWith('o=')) {
+          const originMatch = line.match(/o=\S+ \S+ \S+ IN IP4 ([^\s]+)/);
+          if (originMatch) {
+            originIP = originMatch[1];
+            // Note: 127.0.0.1 and 0.0.0.0 are normal placeholders in initial SDP
+            if (originIP.startsWith('192.168.') || originIP.startsWith('10.') || originIP.startsWith('172.')) {
+              this.log('success', `✅ Good origin IP: ${originIP}`);
+            }
+          }
+        }
+
+        // Check connection line
+        if (line.startsWith('c=')) {
+          const connMatch = line.match(/c=IN IP4 ([^\s]+)/);
+          if (connMatch) {
+            connectionIP = connMatch[1];
+            // Note: 0.0.0.0 is normal placeholder, will be replaced by ICE candidates
+            if (connectionIP !== '0.0.0.0' && connectionIP !== '127.0.0.1') {
+              hasValidIP = true;
+              this.log('success', `✅ Good connection IP: ${connectionIP}`);
+            }
+          }
+        }
+
+        // Check media line
+        if (line.startsWith('m=audio')) {
+          const parts = line.split(' ');
+          audioPort = parseInt(parts[1]);
+          if (audioPort <= 1024) {
+            warnings.push(`Line ${index + 1}: Using reserved port ${audioPort} - may be blocked by firewall`);
+          } else if (audioPort === 9) {
+            issues.push(`Line ${index + 1}: Using port 9 (discard protocol) - will cause connection failure`);
+          } else {
+            this.log('success', `✅ Audio port: ${audioPort}`);
+          }
+        }
+
+        // Check RTCP line
+        if (line.startsWith('a=rtcp:')) {
+          const rtcpMatch = line.match(/a=rtcp:\d+ IN IP4 ([^\s]+)/);
+          if (rtcpMatch) {
+            const rtcpIP = rtcpMatch[1];
+            // Note: 0.0.0.0 is normal placeholder for RTCP
+            if (rtcpIP !== '0.0.0.0') {
+              this.log('success', `✅ RTCP IP: ${rtcpIP}`);
+            }
+          }
+        }
+
+        // Check for candidate lines in SDP
+        if (line.startsWith('a=candidate:')) {
+          const candidateMatch = line.match(/a=candidate:\S+ \d+ \S+ \d+ ([^\s]+) \d+ typ (\S+)/);
+          if (candidateMatch) {
+            const candidateIP = candidateMatch[1];
+            const candidateType = candidateMatch[2];
+            if (candidateIP.startsWith('192.168.') || candidateIP.startsWith('10.')) {
+              this.log('success', `✅ Good SDP candidate: ${candidateType} ${candidateIP}`);
+            }
+          }
+        }
+      });
+
+      // Critical issue analysis
+      const criticalIssues = issues.length;
+      const totalIssues = issues.length + warnings.length;
+
+      // Log analysis results
+      if (criticalIssues > 0) {
+        this.log('error', `🚨 ${type} SDP Critical Issues (${criticalIssues}):`);
+        issues.forEach(issue => {
+          this.log('error', `   • ${issue}`);
+        });
+      }
+
+      if (warnings.length > 0) {
+        this.log('warning', `⚠️  ${type} SDP Warnings (${warnings.length}):`);
+        warnings.forEach(warning => {
+          this.log('warning', `   • ${warning}`);
+        });
+      }
+
+      if (criticalIssues === 0 && warnings.length === 0) {
+        this.log('success', `✅ ${type} SDP looks excellent - ready for ICE candidate exchange`);
+      } else if (criticalIssues === 0) {
+        this.log('info', `👍 ${type} SDP looks good (only minor warnings) - ready for ICE candidate exchange`);
+      } else {
+        this.log('warning', `⚠️ ${type} SDP has some issues - but ICE candidates should handle connectivity`);
+      }
+
+      // Enhanced summary
+      this.log('info', `📊 ${type} SDP Analysis Summary:`);
+      this.log('info', `   • Origin IP: ${originIP || 'not found'} ${originIP === '127.0.0.1' || originIP === '0.0.0.0' ? '(placeholder - normal)' : ''}`);
+      this.log('info', `   • Connection IP: ${connectionIP || 'not found'} ${connectionIP === '0.0.0.0' ? '(placeholder - normal)' : ''}`);
+      this.log('info', `   • Audio Port: ${audioPort || 'not found'}`);
+      this.log('info', `   • Critical Issues: ${criticalIssues}`);
+      this.log('info', `   • Total Issues: ${totalIssues}`);
+      this.log('info', `   • Note: ICE candidates will provide actual connectivity, SDP is just initial negotiation`);
+      this.log('info', `   • SDP Quality: ${this.getSdpConnectivityRating(criticalIssues, hasValidIP)}`);
+
+      // Log first few lines for reference
+      const previewLines = lines.slice(0, 6).join('\n');
+      this.log('debug', `📝 ${type} SDP Preview:\n${previewLines}...`);
+
+      return {
+        hasValidIP,
+        criticalIssues,
+        totalIssues,
+        originIP,
+        connectionIP,
+        audioPort
+      };
+
+    } catch (error) {
+      this.log('error', `Failed to validate ${type} SDP: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get SDP connectivity rating based on issues
+   */
+  getSdpConnectivityRating(criticalIssues, hasValidIP) {
+    if (criticalIssues === 0) {
+      return 'Good ⭐⭐⭐⭐ (Ready for ICE)';
+    } else if (criticalIssues <= 2) {
+      return 'Fair ⭐⭐ (ICE will handle connectivity)';
+    } else {
+      return 'Issues ⭐ (Relies on ICE candidates)';
+    }
+  }
+
+  /**
    * Get user media (microphone)
    */
   async getUserMedia() {
@@ -427,14 +786,35 @@ class VoiceCallService {
   }
 
   /**
-   * Create WebRTC peer connection
+   * Create WebRTC peer connection with enhanced monitoring
    */
   createPeerConnection() {
-    this.peerConnection = new RTCPeerConnection(this.config);
+    this.log('info', '🔧 Creating PeerConnection with enhanced monitoring...');
+
+    // Enhanced config for LAN connections with proper IP handling
+    const enhancedConfig = {
+      ...this.config,
+      // Force ICE to gather all candidates including host candidates
+      iceTransportPolicy: 'all',
+      // Increase ICE candidate pool for better connectivity
+      iceCandidatePoolSize: 20,
+      // Additional constraints for LAN connections
+      rtcConfiguration: {
+        // Force gathering of local network candidates
+        gatherIceCandidates: true,
+        // Prefer local network interfaces
+        preferLocalCandidates: true
+      }
+    };
+
+    this.peerConnection = new RTCPeerConnection(enhancedConfig);
+
+    // Log initial state
+    this.log('debug', `Initial PeerConnection state - ICE: ${this.peerConnection.iceConnectionState}, Signaling: ${this.peerConnection.signalingState}`);
 
     // Handle remote stream
     this.peerConnection.ontrack = (event) => {
-      this.log('success', 'Remote stream received');
+      this.log('success', '🎵 Remote stream received');
       this.remoteStream = event.streams[0];
 
       // Play remote audio
@@ -446,40 +826,158 @@ class VoiceCallService {
       this.setupAudioVisualization(this.remoteStream, 'remote');
     };
 
-    // Handle ICE candidates
+    // Handle ICE candidates with enhanced debug info and filtering
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
-        this.log('debug', 'Local ICE candidate generated');
+        const candidate = event.candidate;
+
+        // Log detailed candidate info
+        this.log('debug', `🧊 Local ICE candidate generated: ${candidate.type} (${candidate.protocol}) - ${candidate.address || 'no-address'}`);
+        this.log('debug', `   └─ Foundation: ${candidate.foundation}, Priority: ${candidate.priority}, Port: ${candidate.port}`);
+
+        // DETAILED CONSOLE LOG for debugging
+        console.log('🚀 LOCAL ICE CANDIDATE GENERATED:', {
+          type: candidate.type,
+          protocol: candidate.protocol,
+          address: candidate.address,
+          port: candidate.port,
+          priority: candidate.priority,
+          foundation: candidate.foundation,
+          component: candidate.component,
+          candidateString: candidate.candidate,
+          usernameFragment: candidate.usernameFragment,
+          sdpMid: candidate.sdpMid,
+          sdpMLineIndex: candidate.sdpMLineIndex,
+          currentCallId: this.currentCallId,
+          isInitiator: this.isInitiator
+        });
+
+        // Filter out problematic candidates for LAN connections
+        const shouldFilterCandidate = this.shouldFilterIceCandidate(candidate);
+        if (shouldFilterCandidate) {
+          this.log('warning', `🚫 Filtering out ICE candidate: ${shouldFilterCandidate}`);
+          console.log('❌ FILTERED LOCAL CANDIDATE:', {
+            reason: shouldFilterCandidate,
+            candidate: candidate
+          });
+          return;
+        }
 
         if (this.currentCallId) {
           // Send immediately if we have callId
           this.socket.emit('call:ice_candidate', {
             callId: this.currentCallId,
-            candidate: event.candidate
+            candidate: candidate
+          });
+          this.log('debug', '📤 ICE candidate sent immediately');
+          console.log('📤 SENT LOCAL ICE CANDIDATE:', {
+            callId: this.currentCallId,
+            candidate: {
+              type: candidate.type,
+              protocol: candidate.protocol,
+              address: candidate.address,
+              port: candidate.port,
+              candidateString: candidate.candidate
+            }
           });
         } else {
           // Queue candidate if callId not available yet
-          this.log('debug', 'Queueing ICE candidate (waiting for callId)');
-          this.iceCandidateQueue.push(event.candidate);
+          this.log('debug', '📥 Queueing ICE candidate (waiting for callId)');
+          this.iceCandidateQueue.push(candidate);
+          console.log('📥 QUEUED LOCAL ICE CANDIDATE:', {
+            queueLength: this.iceCandidateQueue.length,
+            candidate: candidate
+          });
         }
+      } else {
+        this.log('debug', '🏁 ICE candidate gathering completed');
+        console.log('🏁 ICE GATHERING COMPLETED for call:', this.currentCallId);
+        // Force flush any remaining queued candidates when gathering is complete
+        setTimeout(() => {
+          this.flushIceCandidateQueue();
+        }, 100);
       }
     };
 
-    // Handle connection state changes
+    // Handle ICE gathering state changes
+    this.peerConnection.onicegatheringstatechange = () => {
+      const state = this.peerConnection.iceGatheringState;
+      this.log('debug', `🔍 ICE gathering state: ${state}`);
+
+      if (state === 'complete') {
+        this.log('success', '✅ ICE gathering completed successfully');
+      }
+    };
+
+    // Handle connection state changes with extended timeout handling
     this.peerConnection.oniceconnectionstatechange = () => {
       const state = this.peerConnection.iceConnectionState;
-      this.log('info', `ICE connection state: ${state}`);
+      this.log('info', `🔗 ICE connection state: ${state}`);
 
       if (state === 'connected' || state === 'completed') {
         this.callState = 'active';
+        this.log('success', `🎉 WebRTC connection established successfully!`);
         this.notifyStateChange();
-      } else if (state === 'failed' || state === 'disconnected') {
-        this.log('error', 'ICE connection failed');
-        this.cleanup();
+      } else if (state === 'checking') {
+        this.log('info', '🔍 ICE connection checking - this may take longer for LAN connections');
+        // Give more time for LAN connections
+        setTimeout(() => {
+          if (this.peerConnection?.iceConnectionState === 'checking') {
+            this.log('warning', '⏰ ICE checking taking longer than expected, but continuing...');
+          }
+        }, 10000); // 10 seconds warning
+      } else if (state === 'failed') {
+        this.log('error', `❌ ICE connection failed: ${state}`);
+
+        // For LAN connections, try to restart ICE if we haven't established connection yet
+        if (this.callState !== 'active') {
+          this.log('info', '🔄 Attempting ICE restart for LAN connection...');
+          this.restartIce();
+        } else {
+          this.cleanup();
+        }
+      } else if (state === 'disconnected') {
+        this.log('warning', `⚠️ ICE connection disconnected: ${state}`);
+
+        // For LAN, disconnected doesn't always mean failed - give it time to reconnect
+        setTimeout(() => {
+          if (this.peerConnection?.iceConnectionState === 'disconnected') {
+            this.log('error', '❌ ICE connection remained disconnected, cleaning up');
+            this.cleanup();
+          }
+        }, 5000); // 5 second grace period
       }
 
       this.updateDebugInfo();
     };
+
+    // Handle signaling state changes with detailed logging
+    this.peerConnection.onsignalingstatechange = () => {
+      const state = this.peerConnection.signalingState;
+      this.log('debug', `📡 Signaling state changed: ${state}`);
+
+      // Track signaling state for debugging
+      if (state === 'stable') {
+        this.log('debug', '✅ Signaling reached stable state');
+      } else if (state === 'closed') {
+        this.log('warning', '🔴 Signaling state closed');
+      }
+    };
+
+    // Handle connection state changes (newer API)
+    this.peerConnection.onconnectionstatechange = () => {
+      const state = this.peerConnection.connectionState;
+      this.log('info', `🔌 Connection state: ${state}`);
+
+      if (state === 'connected') {
+        this.log('success', '🚀 PeerConnection fully connected!');
+      } else if (state === 'failed' || state === 'disconnected') {
+        this.log('error', `💥 PeerConnection failed: ${state}`);
+        this.cleanup();
+      }
+    };
+
+    this.log('success', '✅ PeerConnection created with all event handlers');
   }
 
   /**
@@ -489,6 +987,10 @@ class VoiceCallService {
     this.log('success', `🚨 PROCESSING INCOMING CALL: ${data.callId}`);
     this.currentCallId = data.callId;
     this.callState = 'ringing';
+
+    // CRITICAL: Immediately join call room to receive ICE candidates
+    this.socket.emit('call:join_room', { callId: data.callId });
+    this.log('debug', `📞 Joining call room: call:${data.callId} to receive ICE candidates`);
 
     this.log('debug', `Setting call state to 'ringing' and calling onIncomingCall callback`);
 
@@ -507,13 +1009,58 @@ class VoiceCallService {
    */
   async handleCallAccepted(data) {
     try {
+      this.log('info', `🎉 Processing call:accepted event. Is initiator: ${this.isInitiator}, CallId: ${data.callId}`);
+      this.log('debug', `   ├─ Current call: ${this.currentCallId}`);
+      this.log('debug', `   ├─ Has SDP answer: ${!!data.sdpAnswer}`);
+      this.log('debug', `   └─ PeerConnection exists: ${!!this.peerConnection}`);
+
+      // Only initiator should handle this event
+      if (!this.isInitiator) {
+        this.log('debug', 'Ignoring call:accepted event - not the initiator');
+        return;
+      }
+
+      // Verify this is our call
+      if (this.currentCallId !== data.callId) {
+        this.log('warning', `Ignoring call:accepted for different call: ${data.callId} vs ${this.currentCallId}`);
+        return;
+      }
+
+      // Check peer connection state
+      if (!this.peerConnection) {
+        this.log('error', 'No peer connection available to set remote description');
+        return;
+      }
+
+      const currentState = this.peerConnection.signalingState;
+      this.log('debug', `PeerConnection signaling state: ${currentState}`);
+
       this.currentCallId = data.callId;
       this.callState = 'active';
 
-      // Set remote description (answer)
-      if (data.sdpAnswer) {
-        await this.peerConnection.setRemoteDescription(data.sdpAnswer);
-        this.log('debug', 'Remote description (answer) set');
+      // Set remote description (answer) only if we're in the right state
+      if (data.sdpAnswer && (currentState === 'have-local-offer' || currentState === 'stable')) {
+        if (currentState === 'stable') {
+          this.log('warning', 'PeerConnection already in stable state, skipping setRemoteDescription');
+        } else {
+          // Validate and log remote answer SDP
+          this.validateAndLogSDP(data.sdpAnswer, 'Remote Answer');
+
+          await this.peerConnection.setRemoteDescription(data.sdpAnswer);
+          this.log('success', '📡 Remote description (answer) set successfully');
+
+          // Process any queued remote ICE candidates IMMEDIATELY
+          this.log('info', '🔄 Flushing remote ICE candidate queue after accepting call...');
+          await this.flushRemoteIceCandidateQueue();
+
+          // Double-check for additional candidates after a short delay
+          setTimeout(async () => {
+            this.log('debug', '🔄 Double-checking remote ICE candidate queue...');
+            await this.flushRemoteIceCandidateQueue();
+          }, 200);
+        }
+      } else if (!data.sdpAnswer) {
+        this.log('warning', 'No SDP answer received in call:accepted event');
       }
 
       this.updateDebugInfo();
@@ -521,7 +1068,53 @@ class VoiceCallService {
 
     } catch (error) {
       this.log('error', `Failed to handle call accepted: ${error.message}`);
+      this.log('debug', `PeerConnection state: ${this.peerConnection?.signalingState}`);
     }
+  }
+
+  /**
+   * Handle call accept confirmed event (for acceptor)
+   */
+  handleCallAcceptConfirmed(data) {
+    this.log('info', `🎯 Processing call:accept_confirmed event. Is initiator: ${this.isInitiator}, CallId: ${data.callId}`);
+    this.log('debug', `   ├─ Current call: ${this.currentCallId}`);
+    this.log('debug', `   ├─ Current state: ${this.callState}`);
+    this.log('debug', `   └─ PeerConnection exists: ${!!this.peerConnection}`);
+
+    // Only acceptor should handle this event
+    if (this.isInitiator) {
+      this.log('debug', 'Ignoring call:accept_confirmed event - this is the initiator');
+      return;
+    }
+
+    // Verify this is our call
+    if (this.currentCallId !== data.callId) {
+      this.log('warning', `Ignoring call:accept_confirmed for different call: ${data.callId} vs ${this.currentCallId}`);
+      return;
+    }
+
+    this.log('success', `✅ Call accept confirmed for acceptor: ${data.callId}`);
+    this.callState = 'active';
+
+    // Log peer connection state
+    if (this.peerConnection) {
+      this.log('debug', `📊 PeerConnection state after accept confirmed:`);
+      this.log('debug', `   ├─ ICE: ${this.peerConnection.iceConnectionState}`);
+      this.log('debug', `   ├─ Signaling: ${this.peerConnection.signalingState}`);
+      this.log('debug', `   ├─ Connection: ${this.peerConnection.connectionState}`);
+      this.log('debug', `   ├─ Has local description: ${!!this.peerConnection.localDescription}`);
+      this.log('debug', `   ├─ Has remote description: ${!!this.peerConnection.remoteDescription}`);
+      this.log('debug', `   └─ Remote ICE queue length: ${this.remoteIceCandidateQueue.length}`);
+
+      // Process any queued ICE candidates
+      if (this.remoteIceCandidateQueue.length > 0) {
+        this.log('info', '🔄 Processing queued remote ICE candidates for acceptor...');
+        this.flushRemoteIceCandidateQueue();
+      }
+    }
+
+    this.updateDebugInfo();
+    this.notifyStateChange();
   }
 
   /**
@@ -541,16 +1134,258 @@ class VoiceCallService {
   }
 
   /**
-   * Handle ICE candidate from remote peer
+   * Handle ICE candidate from remote peer with enhanced error handling
    */
   async handleIceCandidate(data) {
     try {
-      if (this.peerConnection && data.candidate) {
-        await this.peerConnection.addIceCandidate(data.candidate);
-        this.log('debug', 'Remote ICE candidate added');
+      if (!this.peerConnection || !data.candidate) {
+        this.log('warning', 'No peer connection or candidate data available');
+        console.log('⚠️ CANNOT PROCESS REMOTE CANDIDATE:', {
+          hasPeerConnection: !!this.peerConnection,
+          hasCandidate: !!data.candidate,
+          callId: data.callId
+        });
+        return;
       }
+
+      const candidate = data.candidate;
+
+      // Log received candidate with detailed info
+      this.log('debug', `📱 Received remote ICE candidate: ${candidate.type || 'unknown'} (${candidate.protocol || 'unknown'}) - ${candidate.address || 'no-address'}`);
+
+      console.log('🔍 PROCESSING REMOTE ICE CANDIDATE:', {
+        callId: data.callId,
+        candidate: candidate,
+        queueLength: this.remoteIceCandidateQueue.length,
+        hasRemoteDescription: !!this.peerConnection.remoteDescription
+      });
+
+      // Validate candidate before processing
+      if (!candidate.candidate || candidate.candidate.trim() === '') {
+        this.log('warning', '🚫 Ignoring invalid remote ICE candidate: empty candidate string');
+        console.log('❌ INVALID REMOTE CANDIDATE - Empty string:', candidate);
+        return;
+      }
+
+      // Filter problematic remote candidates
+      const shouldFilter = this.shouldFilterRemoteIceCandidate(candidate);
+      if (shouldFilter) {
+        this.log('warning', `🚫 Filtering remote ICE candidate: ${shouldFilter}`);
+        console.log('❌ FILTERED REMOTE CANDIDATE:', {
+          reason: shouldFilter,
+          candidate: candidate
+        });
+        return;
+      }
+
+      // Check if we have remote description set
+      if (!this.peerConnection.remoteDescription) {
+        this.log('debug', '🚫 Remote description not set yet, queueing remote ICE candidate');
+        this.remoteIceCandidateQueue.push(candidate);
+        this.log('debug', `📥 Remote ICE queue now has ${this.remoteIceCandidateQueue.length} candidates`);
+        console.log('📥 QUEUED REMOTE CANDIDATE - No remote description yet:', {
+          candidate: candidate,
+          queueLength: this.remoteIceCandidateQueue.length,
+          signalingState: this.peerConnection.signalingState
+        });
+        return;
+      }
+
+      // Add ICE candidate immediately if remote description is available
+      await this.peerConnection.addIceCandidate(candidate);
+      this.log('debug', '✅ Remote ICE candidate added successfully');
+      console.log('✅ SUCCESSFULLY ADDED REMOTE ICE CANDIDATE:', {
+        candidate: {
+          type: candidate.type,
+          protocol: candidate.protocol,
+          address: candidate.address,
+          port: candidate.port
+        },
+        iceConnectionState: this.peerConnection.iceConnectionState,
+        connectionState: this.peerConnection.connectionState
+      });
+
     } catch (error) {
-      this.log('error', `Failed to add ICE candidate: ${error.message}`);
+      this.log('error', `❌ Failed to add ICE candidate: ${error.message}`);
+      console.log('❌ FAILED TO ADD REMOTE ICE CANDIDATE:', {
+        error: error.message,
+        candidate: data.candidate,
+        peerConnectionState: {
+          iceConnectionState: this.peerConnection?.iceConnectionState,
+          signalingState: this.peerConnection?.signalingState,
+          hasRemoteDescription: !!this.peerConnection?.remoteDescription
+        }
+      });
+
+      // If failed due to remote description not ready, queue it
+      if (error.message.includes('remote description was null') ||
+        error.message.includes('Cannot add ICE candidate')) {
+        this.log('debug', '📥 Queueing ICE candidate due to remote description issue');
+        this.remoteIceCandidateQueue.push(data.candidate);
+        this.log('debug', `📥 Remote ICE queue now has ${this.remoteIceCandidateQueue.length} candidates`);
+        console.log('📥 RE-QUEUED FAILED CANDIDATE:', {
+          candidate: data.candidate,
+          queueLength: this.remoteIceCandidateQueue.length,
+          error: error.message
+        });
+      }
+    }
+  }
+
+  /**
+   * Filter ICE candidates to improve LAN connectivity
+   */
+  shouldFilterIceCandidate(candidate) {
+    if (!candidate || !candidate.address) {
+      return false;
+    }
+
+    const address = candidate.address;
+    const port = candidate.port;
+
+    // Critical: Filter out port 9 (discard protocol) - always blocked by firewall
+    if (port === 9) {
+      return 'Port 9 (discard protocol) - blocked by firewall';
+    }
+
+    // Filter out all reserved ports (1-1024) except common ones
+    if (port && port <= 1024 && port !== 80 && port !== 443) {
+      return `Reserved port ${port} - likely blocked by firewall`;
+    }
+
+    // Filter out WSL/Docker virtual interfaces
+    if (address.startsWith('172.')) {
+      // Common Docker/WSL ranges: 172.16.0.0/12, 172.17.0.0/16, etc.
+      const parts = address.split('.');
+      const secondOctet = parseInt(parts[1]);
+      if (secondOctet >= 16 && secondOctet <= 31) {
+        return 'WSL/Docker virtual interface';
+      }
+    }
+
+    // Filter out other virtual interfaces
+    if (address.startsWith('169.254.')) {
+      return 'Link-local address (APIPA)';
+    }
+
+    // Filter out localhost
+    if (address === '127.0.0.1' || address === '::1') {
+      return 'Localhost address';
+    }
+
+    // Prefer UDP over TCP for better performance
+    if (candidate.protocol === 'tcp' && candidate.type === 'host') {
+      // Allow TCP host candidates but with lower priority
+      this.log('debug', '⚠️ TCP host candidate detected - may have lower priority');
+    }
+
+    // Log useful candidates
+    if (candidate.type === 'host' &&
+      (address.startsWith('192.168.') || address.startsWith('10.') || address.startsWith('172.'))) {
+      this.log('success', `✅ Good LAN candidate: ${candidate.type} ${candidate.protocol} ${address}:${candidate.port}`);
+    }
+
+    return false; // Don't filter
+  }
+
+  /**
+   * Filter remote ICE candidates received from peer
+   */
+  shouldFilterRemoteIceCandidate(candidate) {
+    // Basic validation
+    if (!candidate) {
+      return 'Invalid candidate object';
+    }
+
+    if (!candidate.candidate || typeof candidate.candidate !== 'string') {
+      return 'Missing or invalid candidate string';
+    }
+
+    // Check for undefined/null address
+    if (candidate.address === undefined || candidate.address === null) {
+      return 'Undefined/null address';
+    }
+
+    // Check for empty address
+    if (candidate.address === '' || candidate.address.trim() === '') {
+      return 'Empty address';
+    }
+
+    // Critical: Filter out port 9 (discard protocol) - always blocked by firewall
+    if (candidate.port === 9) {
+      return 'Remote port 9 (discard protocol) - blocked by firewall';
+    }
+
+    // Filter out all reserved ports (1-1024) except common ones
+    if (candidate.port && candidate.port <= 1024 && candidate.port !== 80 && candidate.port !== 443) {
+      return `Remote reserved port ${candidate.port} - likely blocked by firewall`;
+    }
+
+    // Apply same filtering logic as local candidates
+    if (candidate.address) {
+      const address = candidate.address;
+
+      // Filter out WSL/Docker virtual interfaces from remote
+      if (address.startsWith('172.')) {
+        const parts = address.split('.');
+        const secondOctet = parseInt(parts[1]);
+        if (secondOctet >= 16 && secondOctet <= 31) {
+          return 'Remote WSL/Docker virtual interface';
+        }
+      }
+
+      // Filter out link-local addresses
+      if (address.startsWith('169.254.')) {
+        return 'Remote link-local address (APIPA)';
+      }
+
+      // Filter out localhost from remote (shouldn't happen but just in case)
+      if (address === '127.0.0.1' || address === '::1') {
+        return 'Remote localhost address';
+      }
+
+      // Log good remote candidates
+      if (candidate.type === 'host' &&
+        (address.startsWith('192.168.') || address.startsWith('10.') ||
+          (address.startsWith('172.') && !this.isWSLInterface(address)))) {
+        this.log('success', `✅ Good remote LAN candidate: ${candidate.type} ${candidate.protocol || 'unknown'} ${address}:${candidate.port || 'unknown'}`);
+      }
+    }
+
+    return false; // Don't filter
+  }
+
+  /**
+   * Handle renegotiation offer from remote peer
+   */
+  async handleRenegotiation(data) {
+    try {
+      if (!this.peerConnection || !data.sdpOffer) {
+        this.log('warning', 'No peer connection or SDP offer for renegotiation');
+        return;
+      }
+
+      this.log('info', '🔄 Processing renegotiation offer...');
+
+      // Set remote description (renegotiation offer)
+      await this.peerConnection.setRemoteDescription(data.sdpOffer);
+      this.log('debug', '📡 Renegotiation remote description set');
+
+      // Create and send answer
+      const answer = await this.peerConnection.createAnswer();
+      await this.peerConnection.setLocalDescription(answer);
+      this.log('debug', '📡 Renegotiation answer created');
+
+      // Send renegotiation answer
+      this.socket.emit('call:renegotiate', {
+        callId: this.currentCallId,
+        sdpAnswer: answer
+      });
+
+      this.log('success', '✅ Renegotiation completed');
+
+    } catch (error) {
+      this.log('error', `❌ Failed to handle renegotiation: ${error.message}`);
     }
   }
 
@@ -662,20 +1497,170 @@ class VoiceCallService {
   }
 
   /**
+   * Process queued remote ICE candidates after remote description is set
+   */
+  async flushRemoteIceCandidateQueue() {
+    if (this.remoteIceCandidateQueue.length > 0 && this.peerConnection && this.peerConnection.remoteDescription) {
+      this.log('info', `🔄 Processing ${this.remoteIceCandidateQueue.length} queued remote ICE candidates`);
+      console.log('🔄 FLUSHING REMOTE ICE CANDIDATE QUEUE:', {
+        queueLength: this.remoteIceCandidateQueue.length,
+        callId: this.currentCallId,
+        isInitiator: this.isInitiator,
+        hasRemoteDescription: !!this.peerConnection.remoteDescription,
+        signalingState: this.peerConnection.signalingState
+      });
+
+      const candidates = [...this.remoteIceCandidateQueue];
+      this.remoteIceCandidateQueue = [];
+
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
+        try {
+          // Apply filtering to queued candidates as well
+          const shouldFilter = this.shouldFilterRemoteIceCandidate(candidate);
+          if (shouldFilter) {
+            this.log('warning', `🚫 Filtering queued remote ICE candidate: ${shouldFilter}`);
+            console.log(`❌ FILTERED QUEUED CANDIDATE ${i + 1}/${candidates.length}:`, {
+              reason: shouldFilter,
+              candidate: candidate
+            });
+            continue; // Skip this candidate
+          }
+
+          await this.peerConnection.addIceCandidate(candidate);
+          this.log('debug', `✅ Queued remote ICE candidate added: ${candidate.type || 'unknown'}`);
+          console.log(`✅ ADDED QUEUED CANDIDATE ${i + 1}/${candidates.length}:`, {
+            candidate: {
+              type: candidate.type,
+              protocol: candidate.protocol,
+              address: candidate.address,
+              port: candidate.port
+            },
+            iceConnectionState: this.peerConnection.iceConnectionState
+          });
+        } catch (error) {
+          this.log('error', `❌ Failed to add queued ICE candidate: ${error.message}`);
+          console.log(`❌ FAILED TO ADD QUEUED CANDIDATE ${i + 1}/${candidates.length}:`, {
+            error: error.message,
+            candidate: candidate,
+            peerConnectionState: {
+              iceConnectionState: this.peerConnection.iceConnectionState,
+              signalingState: this.peerConnection.signalingState
+            }
+          });
+
+          // Log candidate details for debugging
+          this.log('debug', `   └─ Failed candidate: ${JSON.stringify({
+            type: candidate.type,
+            address: candidate.address,
+            protocol: candidate.protocol,
+            port: candidate.port
+          })}`);
+
+          // Re-queue if still having issues
+          if (error.message.includes('remote description was null')) {
+            this.remoteIceCandidateQueue.push(candidate);
+            console.log('📥 RE-QUEUED FAILED CANDIDATE due to null remote description:', candidate);
+          }
+        }
+      }
+
+      this.log('success', `🎯 Finished processing remote ICE candidate queue. Remaining: ${this.remoteIceCandidateQueue.length}`);
+      console.log('🎯 FLUSH COMPLETE:', {
+        processedCount: candidates.length,
+        remainingInQueue: this.remoteIceCandidateQueue.length,
+        finalIceState: this.peerConnection.iceConnectionState
+      });
+    } else if (this.remoteIceCandidateQueue.length > 0) {
+      this.log('debug', `⏳ Cannot flush remote ICE queue yet. PeerConnection: ${!!this.peerConnection}, RemoteDescription: ${!!this.peerConnection?.remoteDescription}`);
+      console.log('⏳ CANNOT FLUSH QUEUE YET:', {
+        queueLength: this.remoteIceCandidateQueue.length,
+        hasPeerConnection: !!this.peerConnection,
+        hasRemoteDescription: !!this.peerConnection?.remoteDescription,
+        signalingState: this.peerConnection?.signalingState
+      });
+    }
+  }
+
+  /**
    * Send queued ICE candidates when callId becomes available
    */
   flushIceCandidateQueue() {
     if (this.iceCandidateQueue.length > 0 && this.currentCallId) {
       this.log('info', `Sending ${this.iceCandidateQueue.length} queued ICE candidates`);
+      console.log('📤 FLUSHING LOCAL ICE CANDIDATE QUEUE:', {
+        queueLength: this.iceCandidateQueue.length,
+        callId: this.currentCallId,
+        isInitiator: this.isInitiator
+      });
 
-      this.iceCandidateQueue.forEach(candidate => {
+      this.iceCandidateQueue.forEach((candidate, index) => {
         this.socket.emit('call:ice_candidate', {
           callId: this.currentCallId,
           candidate: candidate
         });
+        console.log(`📤 SENT QUEUED LOCAL CANDIDATE ${index + 1}/${this.iceCandidateQueue.length}:`, {
+          callId: this.currentCallId,
+          candidate: {
+            type: candidate.type,
+            protocol: candidate.protocol,
+            address: candidate.address,
+            port: candidate.port,
+            candidateString: candidate.candidate
+          }
+        });
       });
 
+      console.log('🎯 LOCAL QUEUE FLUSH COMPLETE:', {
+        sentCount: this.iceCandidateQueue.length,
+        callId: this.currentCallId
+      });
       this.iceCandidateQueue = [];
+    } else {
+      console.log('⏳ CANNOT FLUSH LOCAL QUEUE:', {
+        queueLength: this.iceCandidateQueue.length,
+        currentCallId: this.currentCallId
+      });
+    }
+  }
+
+  /**
+   * Restart ICE connection for failed LAN connections
+   */
+  async restartIce() {
+    try {
+      if (!this.peerConnection) {
+        this.log('warning', 'Cannot restart ICE - no peer connection');
+        return;
+      }
+
+      this.log('info', '🔄 Restarting ICE connection...');
+
+      // Use restartIce() if available (modern browsers)
+      if (this.peerConnection.restartIce) {
+        this.peerConnection.restartIce();
+        this.log('debug', '✅ ICE restart initiated using restartIce()');
+      } else {
+        // Fallback for older browsers - create new offer
+        this.log('debug', '🔄 Using fallback ICE restart method');
+
+        if (this.isInitiator) {
+          const offer = await this.peerConnection.createOffer({ iceRestart: true });
+          await this.peerConnection.setLocalDescription(offer);
+
+          // Send renegotiation offer to peer
+          this.socket.emit('call:renegotiate', {
+            callId: this.currentCallId,
+            sdpOffer: offer
+          });
+
+          this.log('debug', '📤 ICE restart offer sent');
+        }
+      }
+    } catch (error) {
+      this.log('error', `❌ Failed to restart ICE: ${error.message}`);
+      // If restart fails, cleanup
+      this.cleanup();
     }
   }
 
@@ -711,8 +1696,9 @@ class VoiceCallService {
     this.localAnalyzer = null;
     this.remoteAnalyzer = null;
 
-    // Clear ICE candidate queue
+    // Clear ICE candidate queues
     this.iceCandidateQueue = [];
+    this.remoteIceCandidateQueue = [];
 
     // Notify UI
     this.notifyStateChange();

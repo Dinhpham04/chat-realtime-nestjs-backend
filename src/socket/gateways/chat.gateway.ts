@@ -3038,6 +3038,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             this.logger.log(`📞 Emitting call:incoming to user:${data.targetUserId} room`);
 
+            // CRITICAL FIX: Join target user to call room BEFORE emitting call:incoming
+            // This ensures user B can receive ICE candidates from user A immediately
+            const targetSockets = await this.server.in(`user:${data.targetUserId}`).fetchSockets();
+            this.logger.debug(`🔍 Found ${targetSockets.length} sockets for target user ${data.targetUserId}`);
+            for (const targetSocket of targetSockets) {
+                await targetSocket.join(`call:${callId}`);
+                this.logger.debug(`📞 Target user ${data.targetUserId} joined call room: call:${callId} via socket ${targetSocket.id}`);
+            }
+
             // Notify target user about incoming call via user room
             this.server.to(`user:${data.targetUserId}`).emit('call:incoming', {
                 callId,
@@ -3062,11 +3071,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // Set call timeout to auto-cancel if not answered
             const timeoutId = setTimeout(async () => {
                 try {
-                    this.logger.log(`Call timeout for ${callId} - auto cancelling`);
+                    this.logger.log(`⏰ Call timeout triggered for ${callId} after ${CALL_TIMEOUT}ms - auto cancelling`);
 
                     // Check if call is still in ringing state
                     const currentCall = await this.callStateService.getActiveCall(callId);
+                    this.logger.debug(`📞 Current call state during timeout: ${currentCall?.status || 'NOT_FOUND'}`);
+
                     if (currentCall && currentCall.status === CallStatus.INITIATING) {
+                        this.logger.log(`🚫 Ending call ${callId} due to timeout (no answer)`);
+
                         // End the call due to timeout
                         await this.webRTCSignalingService.hangupCall(userId, {
                             callId,
@@ -3076,17 +3089,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                         // Notify both users about timeout
                         this.server.to(`call:${callId}`).emit('call:timeout', {
                             callId,
-                            reason: 'No answer'
+                            reason: 'No answer - timeout after 30 seconds'
                         });
+
+                        this.logger.log(`📢 call:timeout event emitted for ${callId}`);
 
                         // Clean up call room
                         this.server.in(`call:${callId}`).socketsLeave(`call:${callId}`);
+                        this.logger.debug(`🧹 Cleaned up call room for ${callId}`);
+                    } else {
+                        this.logger.debug(`⏭️  Call ${callId} already handled (status: ${currentCall?.status || 'NOT_FOUND'})`);
                     }
                 } catch (error) {
                     this.logger.error(`Failed to handle call timeout for ${callId}: ${error.message}`);
                 } finally {
                     // Remove timeout reference
                     this.callTimeouts.delete(callId);
+                    this.logger.debug(`🗑️  Removed timeout reference for ${callId}`);
                 }
             }, CALL_TIMEOUT);
 
@@ -3142,19 +3161,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             if (timeoutId) {
                 clearTimeout(timeoutId);
                 this.callTimeouts.delete(data.callId);
-                this.logger.debug(`Cleared call timeout for accepted call: ${data.callId}`);
+                this.logger.log(`✅ Cleared call timeout for accepted call: ${data.callId} (call was answered in time)`);
+            } else {
+                this.logger.warn(`⚠️  No timeout found for call ${data.callId} - this might indicate a timing issue`);
             }
 
-            // Join call room for real-time signaling
+            // Join call room for real-time signaling (redundant but safe)
             await client.join(`call:${data.callId}`);
 
-            // Notify call initiator về SDP answer
-            this.server.to(`call:${data.callId}`).emit('call:accepted', {
+            // DEBUG: Verify user is in call room
+            const roomSockets = await this.server.in(`call:${data.callId}`).fetchSockets();
+            const roomUserIds = roomSockets.map(socket => this.socketToUser.get(socket.id)).filter(Boolean);
+            this.logger.debug(`🏠 After accept, call room call:${data.callId} has ${roomSockets.length} sockets from users: [${roomUserIds.join(', ')}]`);
+
+            // Notify call initiator về SDP answer (not to the acceptor)
+            this.server.to(`call:${data.callId}`).except(client.id).emit('call:accepted', {
                 callId: data.callId,
                 accepterId: userId,
                 sdpAnswer: data.sdpAnswer,
                 status: 'connected'
             });
+
+            this.logger.log(`📞 Emitted call:accepted to initiator for call: ${data.callId}`);
 
             // Confirm to accepter
             client.emit('call:accept_confirmed', {
@@ -3214,6 +3242,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 this.callTimeouts.delete(data.callId);
                 this.logger.debug(`Cleared call timeout for declined call: ${data.callId}`);
             }
+
+            // Leave call room since call is declined
+            await client.leave(`call:${data.callId}`);
+            this.logger.debug(`🚪 User ${userId} left call room: call:${data.callId} after declining`);
 
             // Notify call initiator về call decline
             this.server.to(`call:${data.callId}`).emit('call:declined', {
@@ -3332,7 +3364,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         @MessageBody() data: CallIceCandidateDto
     ): Promise<void> {
         try {
-            this.logger.debug(`WebRTC ICE candidate from client ${client.id}, data:`, data);
+            this.logger.debug(`🧊 WebRTC ICE candidate from client ${client.id} for call ${data.callId}`);
+            this.logger.debug(`📊 ICE candidate details:`, data.candidate);
 
             // Get authenticated user ID from socket
             const userId = this.socketToUser.get(client.id);
@@ -3356,6 +3389,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             this.logger.debug(`Processing ICE candidate for call ${data.callId} from user ${userId}`);
 
+            // Validate ICE candidate before processing
+            if (!data.candidate) {
+                this.logger.error(`ICE candidate validation failed: candidate object is missing`);
+                client.emit('call:error', {
+                    message: 'ICE candidate is required',
+                    code: 'MISSING_ICE_CANDIDATE'
+                });
+                return;
+            }
+
+            // Additional candidate validation
+            if (!data.candidate.candidate || typeof data.candidate.candidate !== 'string') {
+                this.logger.error(`ICE candidate validation failed: invalid candidate string`);
+                client.emit('call:error', {
+                    message: 'Invalid ICE candidate format',
+                    code: 'INVALID_ICE_CANDIDATE'
+                });
+                return;
+            }
+
+            // Parse candidate string and enhance candidate object with parsed properties
+            const enhancedCandidate = this.enhanceIceCandidateObject(data.candidate);
+
+            // Filter problematic candidates before forwarding
+            if (this.shouldFilterIceCandidate(enhancedCandidate)) {
+                this.logger.debug(`🚫 Filtering ICE candidate: ${enhancedCandidate.candidate.substring(0, 100)}...`);
+                return; // Don't forward filtered candidates
+            }
+
             // Use WebRTCSignalingService for business logic
             try {
                 await this.webRTCSignalingService.handleIceCandidate(
@@ -3363,14 +3425,25 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                     data
                 );
 
-                // Forward ICE candidate to other participants in call room
+                // Forward enhanced ICE candidate to other participants in call room
                 client.to(`call:${data.callId}`).emit('call:ice_candidate', {
                     callId: data.callId,
                     fromUserId: userId,
-                    candidate: data.candidate
+                    candidate: enhancedCandidate
                 });
 
-                this.logger.debug(`WebRTC ICE candidate forwarded for call ${data.callId} from user ${userId}`);
+                this.logger.debug(`📤 ICE candidate forwarded for call ${data.callId} from user ${userId}`);
+
+                // CRITICAL DEBUG: Log room participants to verify user B is in the room
+                const roomSockets = await this.server.in(`call:${data.callId}`).fetchSockets();
+                const roomUserIds = roomSockets.map(socket => this.socketToUser.get(socket.id)).filter(Boolean);
+                this.logger.debug(`🏠 Call room call:${data.callId} has ${roomSockets.length} sockets from users: [${roomUserIds.join(', ')}]`);
+
+                if (roomSockets.length === 1) {
+                    this.logger.warn(`⚠️ WARNING: Only sender in call room! ICE candidate may not reach target user.`);
+                } else {
+                    this.logger.debug(`✅ ICE candidate should reach ${roomSockets.length - 1} other participants`);
+                }
 
             } catch (serviceError) {
                 // Check if this is a "call not found" error which is expected after timeout
@@ -3497,6 +3570,61 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
     }
 
+    /**
+     * Join Call Room Handler
+     * 
+     * Allows users to explicitly join a call room to receive ICE candidates
+     * This is useful when user receives call:incoming and needs to be ready to receive candidates
+     * 
+     * @param client - Socket client instance
+     * @param data - Call ID to join
+     */
+    @SubscribeMessage('call:join_room')
+    async handleJoinCallRoom(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { callId: string }
+    ): Promise<void> {
+        try {
+            const userId = this.socketToUser.get(client.id);
+            if (!userId) {
+                client.emit('call:error', {
+                    message: 'Authentication required',
+                    code: 'AUTH_REQUIRED'
+                });
+                return;
+            }
+
+            if (!data.callId) {
+                client.emit('call:error', {
+                    message: 'Call ID is required',
+                    code: 'MISSING_CALL_ID'
+                });
+                return;
+            }
+
+            // Join call room
+            await client.join(`call:${data.callId}`);
+            this.logger.debug(`📞 User ${userId} explicitly joined call room: call:${data.callId} via socket ${client.id}`);
+
+            // Verify room membership
+            const roomSockets = await this.server.in(`call:${data.callId}`).fetchSockets();
+            const roomUserIds = roomSockets.map(socket => this.socketToUser.get(socket.id)).filter(Boolean);
+            this.logger.debug(`🏠 Call room call:${data.callId} now has ${roomSockets.length} sockets from users: [${roomUserIds.join(', ')}]`);
+
+            client.emit('call:room_joined', {
+                callId: data.callId,
+                status: 'joined'
+            });
+
+        } catch (error) {
+            this.logger.error(`Failed to join call room: ${error.message}`, error.stack);
+            client.emit('call:error', {
+                message: error.message || 'Failed to join call room',
+                code: 'JOIN_ROOM_FAILED'
+            });
+        }
+    }
+
     // =============================================
     // HELPER METHODS FOR CALLS
     // =============================================
@@ -3548,5 +3676,138 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         } catch (error) {
             this.logger.error(`Failed to cleanup call state for user ${userId}: ${error.message}`, error.stack);
         }
+    }
+
+    /**
+     * Enhance ICE candidate object with parsed properties for frontend filtering
+     */
+    private enhanceIceCandidateObject(candidate: any): any {
+        if (!candidate || !candidate.candidate || typeof candidate.candidate !== 'string') {
+            return candidate;
+        }
+
+        // Parse ICE candidate string to extract properties
+        // Format: "candidate:123456 1 udp 2113667326 192.168.1.100 54400 typ host generation 0"
+        const candidateString = candidate.candidate;
+        const parts = candidateString.split(' ');
+
+        if (parts.length < 6) {
+            return candidate; // Return original if invalid format
+        }
+
+        // Create enhanced candidate with parsed properties
+        const enhanced = {
+            ...candidate,
+            address: parts[4],      // IP address
+            port: parseInt(parts[5]), // Port number
+            protocol: parts[2],     // Protocol (udp/tcp)
+            type: parts.length > 7 ? parts[7] : 'unknown', // Type after "typ"
+            priority: parts.length > 3 ? parseInt(parts[3]) : 0, // Priority
+            foundation: parts[0].split(':')[1] || parts[0] // Foundation
+        };
+
+        this.logger.debug(`📋 Enhanced ICE candidate: ${enhanced.type} ${enhanced.protocol} ${enhanced.address}:${enhanced.port}`);
+        return enhanced;
+    }
+
+    /**
+     * Filter ICE candidates to improve connectivity and avoid problematic candidates
+     */
+    private shouldFilterIceCandidate(candidate: any): boolean {
+        if (!candidate) {
+            return true; // Filter null/undefined candidates
+        }
+
+        // Basic validation
+        if (!candidate.candidate || typeof candidate.candidate !== 'string') {
+            this.logger.debug('Filtering ICE candidate: invalid candidate string');
+            return true;
+        }
+
+        // Use parsed address if available, otherwise parse candidate string
+        let address = candidate.address;
+        let port = candidate.port;
+        let protocol = candidate.protocol;
+        let type = candidate.type;
+
+        // Fallback to parsing if properties not available
+        if (!address) {
+            const candidateString = candidate.candidate;
+            const parts = candidateString.split(' ');
+
+            if (parts.length < 6) {
+                this.logger.debug('Filtering ICE candidate: invalid format');
+                return true;
+            }
+
+            address = parts[4]; // Address is at index 4
+            port = parts[5];    // Port is at index 5
+            protocol = parts[2]; // Protocol is at index 2 (udp/tcp)
+            type = parts.length > 7 ? parts[7] : 'unknown'; // Type after "typ"
+        }
+
+        // Check for undefined/null address
+        if (!address || address === 'undefined' || address === 'null') {
+            this.logger.debug('Filtering ICE candidate: undefined/null address');
+            return true;
+        }
+
+        // Check for empty address
+        if (address === '' || address.trim() === '') {
+            this.logger.debug('Filtering ICE candidate: empty address');
+            return true;
+        }
+
+        // Filter WSL/Docker virtual interfaces (172.16-31.x.x)
+        if (address.startsWith('172.')) {
+            const addressParts = address.split('.');
+            if (addressParts.length === 4) {
+                const secondOctet = parseInt(addressParts[1]);
+                if (secondOctet >= 16 && secondOctet <= 31) {
+                    this.logger.debug(`Filtering WSL/Docker virtual interface: ${address}`);
+                    return true;
+                }
+            }
+        }
+
+        // Filter out link-local addresses
+        if (address.startsWith('169.254.')) {
+            this.logger.debug(`Filtering link-local address: ${address}`);
+            return true;
+        }
+
+        // Filter out localhost (shouldn't happen but just in case)
+        if (address === '127.0.0.1' || address === '::1') {
+            this.logger.debug(`Filtering localhost address: ${address}`);
+            return true;
+        }
+
+        // Log good candidates for debugging
+        if (type === 'host' &&
+            (address.startsWith('192.168.') || address.startsWith('10.') ||
+                (address.startsWith('172.') && this.isValidPrivateRange(address)))) {
+            this.logger.debug(`✅ Good ICE candidate: ${type} ${protocol} ${address}:${port}`);
+        }
+
+        return false; // Don't filter
+    }
+
+    /**
+     * Helper method to check if 172.x.x.x address is in valid private range (not WSL/Docker)
+     */
+    private isValidPrivateRange(address: string): boolean {
+        if (!address.startsWith('172.')) {
+            return false;
+        }
+
+        const parts = address.split('.');
+        if (parts.length !== 4) {
+            return false;
+        }
+
+        const secondOctet = parseInt(parts[1]);
+        // Valid private range: 172.0.0.0-172.15.255.255 and 172.32.0.0-172.255.255.255
+        // WSL/Docker range: 172.16.0.0-172.31.255.255
+        return (secondOctet >= 0 && secondOctet <= 15) || (secondOctet >= 32 && secondOctet <= 255);
     }
 }
