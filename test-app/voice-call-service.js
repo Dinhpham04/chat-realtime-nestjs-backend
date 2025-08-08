@@ -32,6 +32,9 @@ class VoiceCallService {
     this.iceCandidateQueue = [];
     this.remoteIceCandidateQueue = [];
 
+    // Store incoming call data
+    this.incomingCallData = null;
+
     // Audio Context for visualization
     this.audioContext = null;
     this.localAnalyzer = null;
@@ -66,8 +69,8 @@ class VoiceCallService {
       enableDtlsSrtp: true,
       // Port range configuration to avoid reserved ports
       portRange: {
-        min: 10000,  // Start from port 10000
-        max: 20000   // End at port 20000
+        min: 10,  // Start from port 10000
+        max: 200000   // End at port 20000
       }
     };
 
@@ -93,9 +96,10 @@ class VoiceCallService {
     try {
       this.log('info', '🔍 Analyzing local network configuration...');
 
-      // Get local IP using WebRTC
+      // Get local IP using WebRTC with same config as main connection
       const tempPc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        iceServers: this.config.iceServers,
+        iceTransportPolicy: 'all' // Ensure we gather all types of candidates
       });
 
       const localIPs = [];
@@ -104,6 +108,7 @@ class VoiceCallService {
         tempPc.onicecandidate = (event) => {
           if (event.candidate) {
             const candidate = event.candidate;
+            console.log(`Local ICE candidate found: ${candidate.candidate}`);
             if (candidate.type === 'host' && candidate.address) {
               const ip = candidate.address;
               if (!localIPs.includes(ip)) {
@@ -111,21 +116,47 @@ class VoiceCallService {
 
                 // Analyze IP type
                 let ipType = 'Unknown';
-                if (ip.startsWith('192.168.')) ipType = 'LAN (Class C Private)';
-                else if (ip.startsWith('10.')) ipType = 'LAN (Class A Private)';
-                else if (ip.startsWith('172.')) {
+                let firewallRisk = 'Low';
+
+                if (ip.startsWith('192.168.')) {
+                  ipType = 'LAN (Class C Private)';
+                  firewallRisk = 'Low';
+                } else if (ip.startsWith('10.')) {
+                  ipType = 'LAN (Class A Private)';
+                  firewallRisk = 'Low';
+                } else if (ip.startsWith('172.')) {
                   const secondOctet = parseInt(ip.split('.')[1]);
                   if (secondOctet >= 16 && secondOctet <= 31) {
                     ipType = 'Virtual (Docker/WSL)';
+                    firewallRisk = 'High - May be blocked';
                   } else {
                     ipType = 'LAN (Class B Private)';
+                    firewallRisk = 'Low';
                   }
+                } else if (ip.startsWith('169.254.')) {
+                  ipType = 'Link-Local (APIPA)';
+                  firewallRisk = 'Medium - Limited connectivity';
+                } else if (ip === '127.0.0.1') {
+                  ipType = 'Localhost';
+                  firewallRisk = 'High - Same machine only';
+                } else {
+                  ipType = 'Public/Other';
+                  firewallRisk = 'Variable';
                 }
-                else if (ip.startsWith('169.254.')) ipType = 'Link-Local (APIPA)';
-                else if (ip === '127.0.0.1') ipType = 'Localhost';
-                else ipType = 'Public/Other';
 
-                this.log('info', `🌐 Detected interface: ${ip} (${ipType}) - Protocol: ${candidate.protocol}`);
+                this.log('info', `🌐 Interface: ${ip} (${ipType})`);
+                this.log('info', `   ├─ Protocol: ${candidate.protocol}`);
+                this.log('info', `   ├─ Port: ${candidate.port}`);
+                this.log('info', `   └─ Firewall Risk: ${firewallRisk}`);
+
+                // Specific warnings for testing scenarios
+                if (ip === '127.0.0.1') {
+                  this.log('warning', '⚠️ LOCALHOST DETECTED - Cannot connect between different machines');
+                  this.log('info', '💡 For same-machine testing:');
+                  this.log('info', '   • Use different browsers (Chrome + Firefox)');
+                  this.log('info', '   • Use Incognito mode for one tab');
+                  this.log('info', '   • Check microphone access conflicts');
+                }
               }
             }
           } else {
@@ -142,8 +173,29 @@ class VoiceCallService {
 
             if (lanIPs.length > 0) {
               this.log('success', `🎯 Best IPs for LAN calling: ${lanIPs.join(', ')}`);
+              this.log('info', '📋 Testing recommendations:');
+              this.log('info', '   • For same machine: Use different browsers or Incognito');
+              this.log('info', '   • For different machines: These IPs should work fine');
             } else {
               this.log('warning', '⚠️ No suitable LAN interfaces found for peer-to-peer calling');
+              this.log('warning', '🔥 Potential firewall/network issues detected');
+              this.log('info', '📋 Troubleshooting:');
+              this.log('info', '   • Check Windows Firewall settings');
+              this.log('info', '   • Disable VPN if active');
+              this.log('info', '   • Check antivirus firewall settings');
+              this.log('info', '   • Try testing on different network');
+            }
+
+            // Check for testing conflicts
+            const localhostOnly = localIPs.filter(ip => ip === '127.0.0.1').length === localIPs.length;
+            if (localhostOnly) {
+              this.log('error', '🚨 SAME-MACHINE TESTING DETECTED');
+              this.log('warning', 'Chrome may block microphone access for multiple tabs');
+              this.log('info', '🔧 Solutions:');
+              this.log('info', '   1. Open second tab in Incognito mode (Ctrl+Shift+N)');
+              this.log('info', '   2. Use Firefox for second instance');
+              this.log('info', '   3. Test on different computers');
+              this.log('info', '   4. Use different browsers entirely');
             }
 
             resolve(localIPs);
@@ -157,6 +209,7 @@ class VoiceCallService {
 
     } catch (error) {
       this.log('error', `❌ Network analysis failed: ${error.message}`);
+      this.log('warning', 'This might indicate firewall or network configuration issues');
       return [];
     }
   }
@@ -181,7 +234,7 @@ class VoiceCallService {
 
       const socketOptions = {
         transports: ['websocket', 'polling'],
-        autoConnect: false
+        autoConnect: false,
       };
 
       if (authToken) {
@@ -268,8 +321,10 @@ class VoiceCallService {
     this.socket.on('call:initiated', (data) => {
       this.log('success', `Call initiated successfully: ${data.callId}`);
       this.currentCallId = data.callId;
-      console.debug('📞 Call initiated:', data);
-      // Send any queued ICE candidates
+      console.debug('📞 Call initiated data:', data);
+
+      // Send any queued ICE candidates immediately
+      console.log('🚀 FLUSHING QUEUED ICE CANDIDATES after getting real callId:', this.currentCallId);
       this.flushIceCandidateQueue();
 
       this.updateDebugInfo();
@@ -384,11 +439,48 @@ class VoiceCallService {
   }
 
   /**
-   * Test microphone access
+   * Test microphone access and detect conflicts
    */
   async testMicrophone() {
     try {
-      this.log('info', 'Testing microphone access...');
+      this.log('info', '🔍 Testing microphone access and checking for conflicts...');
+
+      // First, check if we're in a multiple tabs scenario
+      if (typeof document !== 'undefined') {
+        const tabId = 'voice-call-tab-' + Date.now();
+        sessionStorage.setItem('voiceCallTabId', tabId);
+        this.log('debug', `Tab ID: ${tabId}`);
+
+        // Check if other tabs are active
+        try {
+          const existingTabs = JSON.parse(localStorage.getItem('activeVoiceCallTabs') || '[]');
+          const now = Date.now();
+          const activeTabs = existingTabs.filter(tab => now - tab.timestamp < 30000); // Active in last 30 seconds
+
+          if (activeTabs.length > 0) {
+            this.log('warning', `⚠️ Detected ${activeTabs.length} other active voice call tabs`);
+            this.log('warning', '   This might cause microphone conflicts in Chrome');
+            this.log('info', '💡 For testing, consider:');
+            this.log('info', '   • Using Chrome Incognito mode for one tab');
+            this.log('info', '   • Using different browsers (Chrome + Firefox)');
+            this.log('info', '   • Testing on different devices/computers');
+          }
+
+          // Register this tab as active
+          activeTabs.push({ tabId, timestamp: now });
+          localStorage.setItem('activeVoiceCallTabs', JSON.stringify(activeTabs));
+
+          // Cleanup old tabs every 30 seconds
+          setTimeout(() => {
+            const currentTabs = JSON.parse(localStorage.getItem('activeVoiceCallTabs') || '[]');
+            const stillActive = currentTabs.filter(tab => Date.now() - tab.timestamp < 30000);
+            localStorage.setItem('activeVoiceCallTabs', JSON.stringify(stillActive));
+          }, 30000);
+
+        } catch (storageError) {
+          this.log('debug', `Storage check failed: ${storageError.message}`);
+        }
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -400,7 +492,7 @@ class VoiceCallService {
         video: false
       });
 
-      this.log('success', 'Microphone access granted');
+      this.log('success', '✅ Microphone access granted - no conflicts detected');
 
       // Test audio level
       this.setupAudioVisualization(stream, 'local');
@@ -413,7 +505,25 @@ class VoiceCallService {
 
       return true;
     } catch (error) {
-      this.log('error', `Microphone test failed: ${error.message}`);
+      this.log('error', `❌ Microphone test failed: ${error.message}`);
+
+      // Provide specific guidance based on error
+      if (error.name === 'NotAllowedError') {
+        this.log('error', '🚫 MICROPHONE ACCESS DENIED');
+        this.log('info', '📋 Troubleshooting steps:');
+        this.log('info', '   1. Click the 🎤 icon in Chrome address bar');
+        this.log('info', '   2. Select "Always allow" for this site');
+        this.log('info', '   3. Check if another tab is using microphone');
+        this.log('info', '   4. Close other apps using microphone (Zoom, Teams, Discord)');
+      } else if (error.name === 'NotReadableError') {
+        this.log('error', '🔒 MICROPHONE IN USE BY ANOTHER APPLICATION');
+        this.log('info', '📋 Solutions:');
+        this.log('info', '   1. Close other voice call tabs');
+        this.log('info', '   2. Use Incognito mode for testing');
+        this.log('info', '   3. Use different browsers for testing');
+        this.log('info', '   4. Test on different computers');
+      }
+
       throw error;
     }
   }
@@ -438,7 +548,7 @@ class VoiceCallService {
       // Get user media
       await this.getUserMedia();
 
-      // Create peer connection
+      // Create the real peer connection FIRST
       this.createPeerConnection();
 
       // Add local stream to peer connection
@@ -447,7 +557,7 @@ class VoiceCallService {
         this.log('debug', `Added ${track.kind} track to peer connection`);
       });
 
-      // Create SDP offer
+      // Create SDP offer with the real peer connection
       const offer = await this.peerConnection.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: false
@@ -455,19 +565,21 @@ class VoiceCallService {
 
       console.log('📞 Creating SDP offer:', offer);
 
+      // Set local description IMMEDIATELY to avoid SDP mismatch
       await this.peerConnection.setLocalDescription(offer);
-      this.log('debug', 'Local description (offer) set');
+      this.log('debug', 'Local description (offer) set successfully');
 
       // Validate and log our offer SDP for debugging
       this.validateAndLogSDP(offer, 'Local Offer');
 
-      // Send offer to server
+      // Send offer to server to get callId
       this.socket.emit('call:initiate', {
         targetUserId: targetUserId,
         callType: 'voice',
         sdpOffer: offer
       });
 
+      this.log('debug', 'Call initiate sent to server');
       this.updateDebugInfo();
       this.notifyStateChange();
 
@@ -485,15 +597,24 @@ class VoiceCallService {
     try {
       console.debug(`📞 CALL DATA RECEIVE`, callData);
       this.log('info', `Answering call: ${callData.callId}`);
-      this.currentCallId = callData.callId;
+
+      // Use stored incoming call data if available, otherwise use provided data
+      const actualCallData = this.incomingCallData || callData;
+      this.currentCallId = actualCallData.callId;
       this.callState = 'connecting'; // Use connecting state while setting up
       this.isInitiator = false;
 
       // Get user media
       await this.getUserMedia();
 
-      // Create peer connection
-      this.createPeerConnection();
+      // PeerConnection should already exist from handleIncomingCall
+      // If not, create it now (fallback)
+      if (!this.peerConnection) {
+        this.log('warning', '⚠️ PeerConnection not found, creating it now (this should not happen)');
+        this.createPeerConnection();
+      } else {
+        this.log('success', '✅ Using existing PeerConnection created during incoming call');
+      }
 
       // Add local stream
       this.localStream.getTracks().forEach(track => {
@@ -501,11 +622,11 @@ class VoiceCallService {
       });
 
       // Set remote description (offer)
-      await this.peerConnection.setRemoteDescription(callData.sdpOffer);
+      await this.peerConnection.setRemoteDescription(actualCallData.sdpOffer);
       this.log('debug', '📡 Remote description (offer) set successfully');
 
       // Validate and log SDP for debugging
-      this.validateAndLogSDP(callData.sdpOffer, 'Remote Offer');
+      this.validateAndLogSDP(actualCallData.sdpOffer, 'Remote Offer');
 
       // Process any queued remote ICE candidates IMMEDIATELY after setting remote description
       console.log('📨 Processing queued remote ICE candidates... answers');
@@ -765,6 +886,21 @@ class VoiceCallService {
    */
   async getUserMedia() {
     try {
+      // Check if running in same-origin multiple tabs scenario
+      if (typeof navigator !== 'undefined' && navigator.userAgent.includes('Chrome')) {
+        this.log('warning', '⚠️ Chrome detected - checking for multiple tab conflicts...');
+
+        // Try to detect if another tab is using microphone
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const audioInputs = devices.filter(device => device.kind === 'audioinput');
+          this.log('debug', `Found ${audioInputs.length} audio input devices`);
+        } catch (enumError) {
+          this.log('warning', `Failed to enumerate devices: ${enumError.message}`);
+        }
+      }
+
+      this.log('debug', 'Requesting microphone access...');
       this.localStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -775,12 +911,46 @@ class VoiceCallService {
         video: false
       });
 
-      this.log('success', 'Local audio stream acquired');
+      this.log('success', 'Local audio stream acquired successfully');
       this.setupAudioVisualization(this.localStream, 'local');
 
       return this.localStream;
     } catch (error) {
-      this.log('error', `Failed to get user media: ${error.message}`);
+      this.log('error', `❌ Failed to get user media: ${error.message}`);
+
+      // Enhanced error handling for common Chrome issues
+      if (error.name === 'NotAllowedError') {
+        this.log('error', '🚫 Microphone access denied by user or browser policy');
+        this.log('info', '💡 Possible solutions:');
+        this.log('info', '   • Click the microphone icon in Chrome address bar and allow access');
+        this.log('info', '   • Check if another tab is using the microphone');
+        this.log('info', '   • Try refreshing the page or restarting Chrome');
+      } else if (error.name === 'NotReadableError') {
+        this.log('error', '🔒 Microphone is being used by another application');
+        this.log('info', '💡 Possible solutions:');
+        this.log('info', '   • Close other applications using microphone (Zoom, Teams, etc.)');
+        this.log('info', '   • Close other Chrome tabs that might be using microphone');
+        this.log('info', '   • Check Windows sound settings for exclusive mode');
+      } else if (error.name === 'NotFoundError') {
+        this.log('error', '🎤 No microphone found on this device');
+      } else if (error.name === 'OverconstrainedError') {
+        this.log('error', '⚙️ Microphone constraints not supported');
+        this.log('info', '💡 Trying with basic audio constraints...');
+
+        // Fallback: try with basic constraints
+        try {
+          this.localStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false
+          });
+          this.log('success', '✅ Microphone access granted with basic constraints');
+          this.setupAudioVisualization(this.localStream, 'local');
+          return this.localStream;
+        } catch (fallbackError) {
+          this.log('error', `❌ Fallback also failed: ${fallbackError.message}`);
+        }
+      }
+
       throw error;
     }
   }
@@ -991,6 +1161,15 @@ class VoiceCallService {
     // CRITICAL: Immediately join call room to receive ICE candidates
     this.socket.emit('call:join_room', { callId: data.callId });
     this.log('debug', `📞 Joining call room: call:${data.callId} to receive ICE candidates`);
+
+    // CRITICAL FIX: Create PeerConnection immediately to handle incoming ICE candidates
+    // This prevents "No peer connection" errors when remote peer sends ICE candidates
+    this.log('info', '🔧 Creating PeerConnection immediately for incoming call to handle ICE candidates');
+    this.createPeerConnection();
+
+    // Store the incoming call data for later use when user answers
+    this.incomingCallData = data;
+    this.log('debug', '📦 Stored incoming call data for when user answers');
 
     this.log('debug', `Setting call state to 'ringing' and calling onIncomingCall callback`);
 
@@ -1688,6 +1867,11 @@ class VoiceCallService {
 
     // Reset state
     this.currentCallId = null;
+    this.callState = 'idle';
+    this.isInitiator = false;
+    this.isMuted = false;
+    this.isSpeakerOn = false;
+    this.incomingCallData = null;
     this.callState = 'idle';
     this.isInitiator = false;
     this.isMuted = false;

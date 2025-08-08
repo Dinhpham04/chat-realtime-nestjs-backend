@@ -48,6 +48,19 @@ class VoiceCallApp {
       this.useTestUser('user2');
     });
 
+    // Multi-tab testing helpers
+    document.getElementById('openIncognitoBtn').addEventListener('click', () => {
+      this.openIncognitoTab();
+    });
+
+    document.getElementById('openFirefoxBtn').addEventListener('click', () => {
+      this.openInFirefox();
+    });
+
+    document.getElementById('copyUrlBtn').addEventListener('click', () => {
+      this.copyCurrentUrl();
+    });
+
     document.getElementById('testMicBtn').addEventListener('click', () => {
       this.handleTestMicrophone();
     });
@@ -75,11 +88,11 @@ class VoiceCallApp {
 
     // Quick call buttons
     document.getElementById('callUser1').addEventListener('click', () => {
-      this.quickCall('687cf0503cc129a28823e938');
+      this.quickCall('6878adb69c41789577b3b9d1');
     });
 
     document.getElementById('callUser2').addEventListener('click', () => {
-      this.quickCall('687cf0623cc129a28823e944');
+      this.quickCall('687895cb7dd3bd7b1960762d');
     });
 
     // Incoming call modal
@@ -251,6 +264,90 @@ class VoiceCallApp {
       document.getElementById('password').value = user.password;
       this.showInfo(`Using ${user.fullName} credentials`);
     }
+  }
+
+  /**
+   * Open current page in Chrome Incognito mode
+   */
+  openIncognitoTab() {
+    const url = window.location.href;
+    const incognitoUrl = `chrome://incognito/${url}`;
+
+    // Try to open in incognito, fallback to regular tab
+    try {
+      window.open(incognitoUrl, '_blank');
+      this.showInfo('Opening in Incognito mode...');
+      this.log('info', '💡 Instructions for Incognito:');
+      this.log('info', '   1. Allow microphone access when prompted');
+      this.log('info', '   2. Login with Test User 2 credentials');
+      this.log('info', '   3. Test calling between tabs');
+    } catch (error) {
+      // Fallback to regular tab with instructions
+      window.open(url, '_blank');
+      this.showInfo('Opened new tab - manually switch to Incognito');
+      this.log('warning', '⚠️ Could not open Incognito automatically');
+      this.log('info', '📋 Manual steps:');
+      this.log('info', '   1. Press Ctrl+Shift+N for Incognito');
+      this.log('info', '   2. Navigate to this URL');
+      this.log('info', '   3. Login with different test user');
+    }
+  }
+
+  /**
+   * Open current page in Firefox (if available)
+   */
+  openInFirefox() {
+    const url = window.location.href;
+
+    this.showInfo('Copy URL and open in Firefox manually');
+    this.log('info', '🦊 Firefox Testing Instructions:');
+    this.log('info', '   1. Open Firefox browser');
+    this.log('info', '   2. Navigate to: ' + url);
+    this.log('info', '   3. Login with Test User 2');
+    this.log('info', '   4. Allow microphone access');
+    this.log('info', '   5. Test calling between browsers');
+
+    // Copy URL to clipboard
+    this.copyCurrentUrl();
+  }
+
+  /**
+   * Copy current URL to clipboard
+   */
+  copyCurrentUrl() {
+    const url = window.location.href;
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(() => {
+        this.showSuccess('URL copied to clipboard!');
+        this.log('success', '📋 URL copied: ' + url);
+      }).catch(err => {
+        this.fallbackCopyUrl(url);
+      });
+    } else {
+      this.fallbackCopyUrl(url);
+    }
+  }
+
+  /**
+   * Fallback method to copy URL
+   */
+  fallbackCopyUrl(url) {
+    const textArea = document.createElement('textarea');
+    textArea.value = url;
+    document.body.appendChild(textArea);
+    textArea.select();
+
+    try {
+      document.execCommand('copy');
+      this.showSuccess('URL copied to clipboard!');
+      this.log('success', '📋 URL copied: ' + url);
+    } catch (err) {
+      this.showError('Failed to copy URL');
+      this.log('error', 'Copy failed: ' + err.message);
+    }
+
+    document.body.removeChild(textArea);
   }
 
   /**

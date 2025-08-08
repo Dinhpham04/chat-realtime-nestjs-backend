@@ -114,19 +114,24 @@ export function getCorsOrigins(): string[] {
     const localIP = getLocalNetworkIP();
     const port = process.env.PORT || 3000;
 
-    // Add local network access for mobile development
+    // Add local network access for mobile development + test app URLs
     const localNetworkOrigins = [
       `http://${localIP}:${port}`,
+      `http://localhost:${port}`, // For local test app access
       `http://${localIP}:8083`, // Expo Go default port
       `http://${localIP}:19000`, // Expo development server
       `http://${localIP}:19001`, // Expo development server alternative
       'http://localhost:8081',
       'http://localhost:19000',
       'http://localhost:19001',
-      'http://192.168.0.101:8081',
       'http://127.0.0.1:5500',
-      'http://192.168.0.104:5500',
-      'http://172.20.10.23:8083'
+      `http://${localIP}:5500`,
+      'https://*.ngrok.io',
+      'https://*.ngrok.io/voice-call-test.html',
+      'https://*.ngrok-free.app',
+      'https://*.ngrok-free.app/voice-call-test.html',
+      'http://localhost:*',
+      `http://${localIP}:*`
     ];
 
     return [...baseOrigins, ...localNetworkOrigins];
@@ -153,6 +158,10 @@ export function logNetworkConfiguration(port: number, apiPrefix: string): void {
     console.log(`   API Base URL: http://${localIP}:${port}/${apiPrefix}`);
     console.log(`   Socket.IO URL: http://${localIP}:${port}`);
     console.log(`   Swagger Docs: http://${localIP}:${port}/${apiPrefix}/docs`);
+    console.log('\n🎮 VOICE CALL TEST APP:');
+    console.log(`   Local: http://localhost:${port}/voice-call-test.html`);
+    console.log(`   Network: http://${localIP}:${port}/voice-call-test.html`);
+    console.log(`   Root redirect: http://localhost:${port}/ → voice-call-test.html`);
     console.log('\n💡 For Expo Go development:');
     console.log(`   1. Connect your mobile device to the same WiFi network`);
     console.log(`   2. Use this IP in your React Native app: ${localIP}:${port}`);
@@ -160,9 +169,11 @@ export function logNetworkConfiguration(port: number, apiPrefix: string): void {
   }
 
   console.log('\n🔗 Available URLs:');
-  console.log(`   Local: http://localhost:${port}/${apiPrefix}`);
+  console.log(`   API: http://localhost:${port}/${apiPrefix}`);
+  console.log(`   Test App: http://localhost:${port}/voice-call-test.html`);
   if (isDevelopmentEnvironment() && localIP !== 'localhost') {
-    console.log(`   Network: http://${localIP}:${port}/${apiPrefix}`);
+    console.log(`   Network API: http://${localIP}:${port}/${apiPrefix}`);
+    console.log(`   Network Test App: http://${localIP}:${port}/voice-call-test.html`);
   }
 }
 

@@ -167,8 +167,39 @@
           </button>
           <button id="useTestUser2"
             class="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm transition-colors">
-            Use Test User 2 (+84901234568)
+            Use Test User 2 (+84901234001)
           </button>
+        </div>
+      </div>
+
+      <!-- Testing Mode Selection -->
+      <div class="mt-4 p-4 bg-orange-500/20 rounded-lg border border-orange-500/30">
+        <h4 class="text-white font-semibold mb-2 flex items-center">
+          <i class="fas fa-exclamation-triangle mr-2 text-orange-400"></i>
+          Same-Machine Testing Detected
+        </h4>
+        <p class="text-white/90 text-sm mb-3">
+          Chrome restricts microphone access for multiple tabs. Choose your testing approach:
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <button id="openIncognitoBtn"
+            class="px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded text-sm transition-colors">
+            <i class="fas fa-user-secret mr-1"></i>
+            Open Incognito
+          </button>
+          <button id="openFirefoxBtn"
+            class="px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded text-sm transition-colors">
+            <i class="fab fa-firefox mr-1"></i>
+            Use Firefox
+          </button>
+          <button id="copyUrlBtn"
+            class="px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded text-sm transition-colors">
+            <i class="fas fa-copy mr-1"></i>
+            Copy URL
+          </button>
+        </div>
+        <div class="mt-2 text-xs text-white/70">
+          💡 For best results, test on different computers or use different browsers
         </div>
       </div>
 
@@ -236,7 +267,7 @@
               placeholder="Enter User ID or Phone Number">
 
             <div class="text-xs text-white/60">
-              Test User IDs: 687cf0503cc129a28823e938, 687cf0623cc129a28823e944
+              Test User IDs: 6878adb69c41789577b3b9d1, 687895cb7dd3bd7b1960762d
             </div>
 
             <div class="grid grid-cols-2 gap-2">

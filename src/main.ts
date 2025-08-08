@@ -9,6 +9,8 @@ import {
   validateNetworkConnectivity,
   isDevelopmentEnvironment
 } from './shared/utils/network/network-utils';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
 
 /**
  * Bootstrap function - Application entry point
@@ -19,12 +21,20 @@ import {
  * - Mobile-First: Local network access for Expo Go development
  */
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
 
-  // Global prefix
+  // Global prefix for API routes
   const apiPrefix = configService.get('apiPrefix');
   app.setGlobalPrefix(apiPrefix);
+
+  // Static files serving - test-app available at root URL
+  if (isDevelopmentEnvironment()) {
+    const staticPath = join(__dirname, '..', '..', 'test-app');
+    app.useStaticAssets(staticPath);
+    console.log(`🌐 Static files served from: ${staticPath}`);
+    console.log(`📱 Test app available at: http://localhost:${configService.get('port')}/voice-call-test.html`);
+  }
 
   // Global validation pipe
   app.useGlobalPipes(

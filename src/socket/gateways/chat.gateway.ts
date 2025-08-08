@@ -3415,7 +3415,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             // Filter problematic candidates before forwarding
             if (this.shouldFilterIceCandidate(enhancedCandidate)) {
-                this.logger.debug(`🚫 Filtering ICE candidate: ${enhancedCandidate.candidate.substring(0, 100)}...`);
+                this.logger.debug(`🚫 Filtering ICE candidate: ${enhancedCandidate.candidate.substring(0, 100)}...`, 'at: ', enhancedCandidate?.address);
                 return; // Don't forward filtered candidates
             }
 
@@ -3433,7 +3433,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                     candidate: enhancedCandidate
                 });
 
-                this.logger.debug(`📤 ICE candidate forwarded for call ${data.callId} from user ${userId}`);
+                this.logger.debug(`📤 ICE candidate forwarded for call ${data.callId} from user ${userId}`, enhancedCandidate);
 
                 // CRITICAL DEBUG: Log room participants to verify user B is in the room
                 const roomSockets = await this.server.in(`call:${data.callId}`).fetchSockets();

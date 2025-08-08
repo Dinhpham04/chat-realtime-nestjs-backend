@@ -21,6 +21,7 @@ import { FriendsModule } from './modules/friends/friends.module';
 import { FilesModule } from './modules/files/files.module';
 import { CallsModule } from './modules/calls/calls.module';
 import { SocketModule } from './socket/socket.module';
+import { StaticController } from './controllers/static.controller';
 
 @Module({
   imports: [
@@ -47,7 +48,7 @@ import { SocketModule } from './socket/socket.module';
     FilesModule,
     CallsModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, StaticController],
   providers: [
     AppService,
     // Global Exception Filters
