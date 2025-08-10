@@ -108,7 +108,7 @@ export class ConversationsController {
           id: p.userId,
           username: p.username || '',
           fullName: p.fullName || '',
-          avatar: p.avatar || null
+          avatar: p.avatarUrl || '',
         }
       })) || [],
       settings: {
@@ -188,6 +188,7 @@ export class ConversationsController {
     }
 
     this.logger.log(`Retrieved conversation: ${conversation.id}`);
+    this.logger.debug(`Conversation details: `, conversation);
 
     return this.convertToResponseDto(conversation);
   }

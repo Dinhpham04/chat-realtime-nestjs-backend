@@ -29,7 +29,7 @@ export interface IConversationRepository {
   /**
    * Find conversation by ID with participants populated
    */
-  findByIdWithParticipants(conversationId: string): Promise<ConversationWithParticipants | null>;
+  findByIdWithParticipants(conversationId: string, currentUserId?: string): Promise<ConversationWithParticipants | null>;
 
   /**
    * Find conversation by ID (basic info only - alias for findByIdWithParticipants)

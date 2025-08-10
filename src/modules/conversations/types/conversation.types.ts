@@ -95,6 +95,8 @@ export interface ParticipantInfo {
   readonly conversationId: string;
   readonly userId: string;
   role: ParticipantRole;
+  readonly fullName?: string;
+  readonly avatarUrl?: string;
   readonly joinedAt: Date;
   leftAt?: Date;
   readonly addedBy: string;

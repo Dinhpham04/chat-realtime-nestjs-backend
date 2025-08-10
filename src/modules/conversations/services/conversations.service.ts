@@ -148,7 +148,7 @@ export class ConversationsService implements IConversationsService {
     this.logger.log(`Getting conversation ${conversationId} for user ${userId}`);
 
     try {
-      const conversation = await this.conversationRepository.findByIdWithParticipants(conversationId);
+      const conversation = await this.conversationRepository.findByIdWithParticipants(conversationId, userId);
 
       if (!conversation) {
         return null;
@@ -162,6 +162,8 @@ export class ConversationsService implements IConversationsService {
       if (!isParticipant) {
         throw new BadRequestException('Access denied to this conversation');
       }
+
+      this.logger.debug(`Found conversation from service`, conversation);
 
       // Return the conversation directly as it's already ConversationWithParticipants
       return conversation;

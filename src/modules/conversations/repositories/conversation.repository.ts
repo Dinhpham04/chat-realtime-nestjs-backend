@@ -118,7 +118,7 @@ export class ConversationRepository implements IConversationRepository {
     }
   }
 
-  async findByIdWithParticipants(conversationId: string): Promise<ConversationWithParticipants | null> {
+  async findByIdWithParticipants(conversationId: string, currentUserId?: string): Promise<ConversationWithParticipants | null> {
     try {
       // Use aggregation to get conversation with participants and user details in one query
       const result = await this.conversationModel.aggregate([
@@ -171,7 +171,48 @@ export class ConversationRepository implements IConversationRepository {
             ],
             as: 'participants'
           }
-        }
+        },
+        // For direct conversations, lookup the other participant's user info if currentUserId is provided
+        ...(currentUserId ? [{
+          $lookup: {
+            from: 'conversation_participants',
+            let: {
+              conversationId: '$_id',
+              currentUserId: new Types.ObjectId(currentUserId)
+            },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$conversationId', '$$conversationId'] },
+                      { $ne: ['$userId', '$$currentUserId'] }, // Get the other participant
+                      { $not: { $ifNull: ['$leftAt', false] } } // Active participants
+                    ]
+                  }
+                }
+              },
+              {
+                $lookup: {
+                  from: 'users_core',
+                  localField: 'userId',
+                  foreignField: '_id',
+                  as: 'userInfo'
+                }
+              },
+              { $unwind: '$userInfo' },
+              {
+                $project: {
+                  userId: 1,
+                  fullName: '$userInfo.fullName',
+                  username: '$userInfo.username',
+                  avatarUrl: '$userInfo.avatarUrl'
+                }
+              }
+            ],
+            as: 'otherParticipant',
+          },
+        }] : []),
       ]).exec();
 
       if (!result || result.length === 0) {
@@ -201,15 +242,17 @@ export class ConversationRepository implements IConversationRepository {
         participantCount: conversationData.participants?.length || 0
       });
 
-      return this.mapAggregatedToConversationWithParticipants(conversationData);
+      this.logger.debug('found conversation from repository', conversationData);
+
+      return this.mapAggregatedToConversationWithParticipants(conversationData, currentUserId);
     } catch (error) {
       this.logger.error(`Error finding conversation by ID: ${error.message}`, error.stack);
       throw error;
     }
   }
 
-  async findById(conversationId: string): Promise<ConversationWithParticipants | null> {
-    return this.findByIdWithParticipants(conversationId);
+  async findById(conversationId: string, currentUserId?: string): Promise<ConversationWithParticipants | null> {
+    return this.findByIdWithParticipants(conversationId, currentUserId);
   }
 
   async updateById(
@@ -1196,27 +1239,28 @@ export class ConversationRepository implements IConversationRepository {
   /**
    * Map aggregated conversation data to ConversationWithParticipants
    */
-  private mapAggregatedToConversationWithParticipants(aggregatedData: any): ConversationWithParticipants {
-    // Debug log to check what data we receive
-    this.logger.debug('Mapping aggregated data:', {
-      id: aggregatedData._id,
-      name: aggregatedData.name,
-      type: aggregatedData.type,
-      hasParticipants: !!aggregatedData.participants,
-      participantCount: aggregatedData.participants?.length || 0
-    });
+  private mapAggregatedToConversationWithParticipants(aggregatedData: any, currentUserId?: string): ConversationWithParticipants {
+    // For direct conversations, use other participant's name and avatar if available
+    let displayName = aggregatedData.name;
+    let displayAvatarUrl = aggregatedData.avatarUrl;
+
+    if (aggregatedData.type === 'direct' && currentUserId && aggregatedData.otherParticipant?.length > 0) {
+      const otherParticipant = aggregatedData.otherParticipant[0];
+      displayName = otherParticipant.fullName || otherParticipant.username;
+      displayAvatarUrl = otherParticipant.avatarUrl;
+    }
 
     return {
       id: aggregatedData._id.toString(),
       type: aggregatedData.type || 'direct',
-      name: aggregatedData.name || null,
+      name: displayName || null,
       description: aggregatedData.description || null,
-      avatarUrl: aggregatedData.avatarUrl || null,
+      avatarUrl: displayAvatarUrl || null,
       createdBy: aggregatedData.createdBy?.toString() || '',
       createdAt: aggregatedData.createdAt || new Date(),
       updatedAt: aggregatedData.updatedAt || new Date(),
       isActive: aggregatedData?.isActive, // Default to true
-      lastMessage: aggregatedData.lastMessage ? {
+      lastMessage: aggregatedData.lastMessage ? { // gọi qua socket
         messageId: aggregatedData.lastMessage.messageId?.toString() || '',
         senderId: aggregatedData.lastMessage.senderId?.toString() || '',
         content: aggregatedData.lastMessage.content || '',
@@ -1256,17 +1300,12 @@ export class ConversationRepository implements IConversationRepository {
    * Map aggregated participant data with user details
    */
   private mapAggregatedParticipantData(participantData: any): ParticipantInfo {
-    // Debug log to check participant data structure
-    this.logger.debug('Mapping participant data:', {
-      userId: participantData.userId,
-      role: participantData.role,
-      hasUserDetails: !!participantData.userDetails
-    });
-
     return {
       conversationId: participantData.conversationId?.toString() || '',
       userId: participantData.userId?.toString() || '',
       role: participantData.role || 'member',
+      fullName: participantData.userDetails?.fullName || '',
+      avatarUrl: participantData.userDetails?.avatarUrl || '',
       joinedAt: participantData.joinedAt || new Date(),
       leftAt: participantData.leftAt || undefined,
       addedBy: participantData.addedBy?.toString() || '',
