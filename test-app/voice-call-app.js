@@ -18,8 +18,6 @@ class VoiceCallApp {
     this.initializeEventListeners();
     this.setupServiceCallbacks();
     this.updateConnectionStatus(false);
-
-    this.log('info', 'Voice Call Test Application started');
   }
 
   /**
@@ -48,19 +46,6 @@ class VoiceCallApp {
       this.useTestUser('user2');
     });
 
-    // Multi-tab testing helpers
-    document.getElementById('openIncognitoBtn').addEventListener('click', () => {
-      this.openIncognitoTab();
-    });
-
-    document.getElementById('openFirefoxBtn').addEventListener('click', () => {
-      this.openInFirefox();
-    });
-
-    document.getElementById('copyUrlBtn').addEventListener('click', () => {
-      this.copyCurrentUrl();
-    });
-
     document.getElementById('testMicBtn').addEventListener('click', () => {
       this.handleTestMicrophone();
     });
@@ -68,6 +53,46 @@ class VoiceCallApp {
     // Call controls
     document.getElementById('startCallBtn').addEventListener('click', () => {
       this.handleStartCall();
+    });
+
+    // NEW Task 1.3: Video Call Controls
+    document.getElementById('startVideoCallBtn').addEventListener('click', () => {
+      this.handleStartVideoCall();
+    });
+
+    // Video call control buttons
+    document.getElementById('toggleVideoBtn').addEventListener('click', () => {
+      this.handleToggleVideo();
+    });
+
+    document.getElementById('toggleVideoBtn2').addEventListener('click', () => {
+      this.handleToggleVideo();
+    });
+
+    document.getElementById('switchCameraBtn').addEventListener('click', () => {
+      this.handleSwitchCamera();
+    });
+
+    document.getElementById('switchCameraBtn2').addEventListener('click', () => {
+      this.handleSwitchCamera();
+    });
+
+    document.getElementById('muteAudioBtn').addEventListener('click', () => {
+      this.handleToggleMute();
+    });
+
+    document.getElementById('hangupVideoBtn').addEventListener('click', () => {
+      this.handleHangup();
+    });
+
+    // Camera mode selection
+    document.getElementById('cameraMode').addEventListener('change', () => {
+      this.updateCameraSelection();
+    });
+
+    // Test camera button - NEW Task 1.4
+    document.getElementById('testCameraBtn').addEventListener('click', () => {
+      this.handleTestCamera();
     });
 
     document.getElementById('answerCallBtn').addEventListener('click', () => {
@@ -127,31 +152,42 @@ class VoiceCallApp {
    * Setup callbacks for VoiceCallService events
    */
   setupServiceCallbacks() {
-    this.log('debug', '🔧 Setting up VoiceCallService callbacks');
+    // Set up VoiceCallService callbacks
 
     this.voiceService.onCallStateChanged = (state) => {
       this.handleCallStateChange(state);
     };
 
     this.voiceService.onIncomingCall = (callData) => {
-      this.log('success', `📱 UI RECEIVED INCOMING CALL CALLBACK: ${callData.callId}`);
+      this.log('success', `📱 UI RECEIVED INCOMING ${callData.callType?.toUpperCase() || 'VOICE'} CALL CALLBACK: ${callData.callId}`);
+
+      // Show video container for video calls
+      if (callData.callType === 'video') {
+        this.showVideoContainer();
+      }
+
       this.showIncomingCallModal(callData);
     };
 
     this.voiceService.onCallEnded = () => {
       this.hideIncomingCallModal();
+      this.hideVideoContainer(); // Hide video container when call ends
       this.resetCallUI();
     };
 
     this.voiceService.onError = (error) => {
       this.showError(error.message);
+      // Hide video container on error
+      if (this.voiceService.isVideoCall) {
+        this.hideVideoContainer();
+      }
     };
 
     this.voiceService.onDebugUpdate = (debugInfo) => {
       this.updateDebugInfo(debugInfo);
     };
 
-    this.log('debug', '✅ All callbacks set up successfully');
+    // All callbacks set up successfully
   }
 
   /**
@@ -214,7 +250,7 @@ class VoiceCallApp {
 
       // Login to get JWT token
       const loginResult = await this.authService.login(phoneNumber, password);
-      console.log('Login result:', loginResult);
+      // Login successful
       this.authToken = loginResult.accessToken;
       this.currentUser = loginResult.user;
 
@@ -264,90 +300,6 @@ class VoiceCallApp {
       document.getElementById('password').value = user.password;
       this.showInfo(`Using ${user.fullName} credentials`);
     }
-  }
-
-  /**
-   * Open current page in Chrome Incognito mode
-   */
-  openIncognitoTab() {
-    const url = window.location.href;
-    const incognitoUrl = `chrome://incognito/${url}`;
-
-    // Try to open in incognito, fallback to regular tab
-    try {
-      window.open(incognitoUrl, '_blank');
-      this.showInfo('Opening in Incognito mode...');
-      this.log('info', '💡 Instructions for Incognito:');
-      this.log('info', '   1. Allow microphone access when prompted');
-      this.log('info', '   2. Login with Test User 2 credentials');
-      this.log('info', '   3. Test calling between tabs');
-    } catch (error) {
-      // Fallback to regular tab with instructions
-      window.open(url, '_blank');
-      this.showInfo('Opened new tab - manually switch to Incognito');
-      this.log('warning', '⚠️ Could not open Incognito automatically');
-      this.log('info', '📋 Manual steps:');
-      this.log('info', '   1. Press Ctrl+Shift+N for Incognito');
-      this.log('info', '   2. Navigate to this URL');
-      this.log('info', '   3. Login with different test user');
-    }
-  }
-
-  /**
-   * Open current page in Firefox (if available)
-   */
-  openInFirefox() {
-    const url = window.location.href;
-
-    this.showInfo('Copy URL and open in Firefox manually');
-    this.log('info', '🦊 Firefox Testing Instructions:');
-    this.log('info', '   1. Open Firefox browser');
-    this.log('info', '   2. Navigate to: ' + url);
-    this.log('info', '   3. Login with Test User 2');
-    this.log('info', '   4. Allow microphone access');
-    this.log('info', '   5. Test calling between browsers');
-
-    // Copy URL to clipboard
-    this.copyCurrentUrl();
-  }
-
-  /**
-   * Copy current URL to clipboard
-   */
-  copyCurrentUrl() {
-    const url = window.location.href;
-
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(url).then(() => {
-        this.showSuccess('URL copied to clipboard!');
-        this.log('success', '📋 URL copied: ' + url);
-      }).catch(err => {
-        this.fallbackCopyUrl(url);
-      });
-    } else {
-      this.fallbackCopyUrl(url);
-    }
-  }
-
-  /**
-   * Fallback method to copy URL
-   */
-  fallbackCopyUrl(url) {
-    const textArea = document.createElement('textarea');
-    textArea.value = url;
-    document.body.appendChild(textArea);
-    textArea.select();
-
-    try {
-      document.execCommand('copy');
-      this.showSuccess('URL copied to clipboard!');
-      this.log('success', '📋 URL copied: ' + url);
-    } catch (err) {
-      this.showError('Failed to copy URL');
-      this.log('error', 'Copy failed: ' + err.message);
-    }
-
-    document.body.removeChild(textArea);
   }
 
   /**
@@ -406,6 +358,240 @@ class VoiceCallApp {
 
     } catch (error) {
       this.showError(`Failed to start call: ${error.message}`);
+    }
+  }
+
+  /**
+   * Handle start video call - NEW Task 1.3
+   */
+  async handleStartVideoCall() {
+    const targetUserId = document.getElementById('targetUserId').value.trim();
+    const cameraMode = document.getElementById('cameraMode').value;
+
+    if (!targetUserId) {
+      this.showError('Please enter target user ID');
+      return;
+    }
+
+    if (!this.voiceService.isConnected) {
+      this.showError('Please login and connect first');
+      return;
+    }
+
+    if (!this.authToken) {
+      this.showError('Authentication required');
+      return;
+    }
+
+    try {
+      // Check camera permissions first - NEW Task 1.4
+      // Checking camera permissions
+      const hasPermissions = await this.requestVideoPermissions();
+
+      if (!hasPermissions) {
+        this.showError('Camera permissions required for video calls');
+        return;
+      }
+
+      this.log('info', `Starting video call to ${targetUserId} with ${cameraMode} camera...`);
+
+      // Show video container
+      this.showVideoContainer();
+
+      await this.voiceService.startVideoCall(targetUserId, cameraMode);
+      this.showSuccess('Video call initiated successfully');
+
+    } catch (error) {
+      this.showError(`Failed to start video call: ${error.message}`);
+      this.hideVideoContainer();
+    }
+  }
+
+  /**
+   * Handle toggle video on/off - NEW Task 1.3
+   */
+  handleToggleVideo() {
+    if (!this.voiceService.isVideoCall) {
+      this.showError('No video call active');
+      return;
+    }
+
+    try {
+      const isVideoEnabled = this.voiceService.toggleVideo();
+      this.log('info', `Video ${isVideoEnabled ? 'enabled' : 'disabled'}`);
+      this.showSuccess(`Video ${isVideoEnabled ? 'enabled' : 'disabled'}`);
+
+    } catch (error) {
+      this.showError(`Failed to toggle video: ${error.message}`);
+    }
+  }
+
+  /**
+   * Handle switch camera - NEW Task 1.3
+   */
+  async handleSwitchCamera() {
+    if (!this.voiceService.isVideoCall) {
+      this.showError('No video call active');
+      return;
+    }
+
+    try {
+      this.log('info', 'Switching camera...');
+      const success = await this.voiceService.switchCamera();
+
+      if (success) {
+        this.showSuccess('Camera switched successfully');
+      } else {
+        this.showError('Failed to switch camera');
+      }
+
+    } catch (error) {
+      this.showError(`Camera switch error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Show video container and controls - NEW Task 1.3
+   */
+  showVideoContainer() {
+    const videoContainer = document.getElementById('videoContainer');
+    const cameraSelection = document.getElementById('cameraSelection');
+
+    if (videoContainer) {
+      videoContainer.classList.remove('hidden');
+      videoContainer.classList.add('active');
+    }
+
+    if (cameraSelection) {
+      cameraSelection.classList.remove('hidden');
+    }
+
+    // Video container displayed
+  }
+
+  /**
+   * Hide video container and controls - NEW Task 1.3
+   */
+  hideVideoContainer() {
+    const videoContainer = document.getElementById('videoContainer');
+    const cameraSelection = document.getElementById('cameraSelection');
+
+    videoContainer.classList.add('hidden');
+    videoContainer.classList.remove('active');
+    cameraSelection.classList.add('hidden');
+
+    // Video container hidden
+  }
+
+  /**
+   * Update camera selection display - NEW Task 1.3
+   */
+  async updateCameraSelection() {
+    const cameraMode = document.getElementById('cameraMode').value;
+    // Camera mode selected
+
+    // Load available cameras when camera selection is shown
+    await this.loadAvailableCameras();
+  }
+
+  /**
+   * Load and populate available cameras - NEW Task 1.4
+   */
+  async loadAvailableCameras() {
+    try {
+      // Check permissions first
+      const permissions = await this.voiceService.checkCameraPermissions();
+
+      if (permissions.camera === 'denied') {
+        this.log('warning', 'Camera permission denied - cannot enumerate cameras');
+        return;
+      }
+
+      // Get available cameras
+      const cameras = await this.voiceService.getAvailableCameras();
+
+      if (cameras.length === 0) {
+        this.log('warning', 'No cameras found on this device');
+        return;
+      }
+
+      // Update camera selection dropdown
+      const cameraSelect = document.getElementById('cameraMode');
+      if (cameraSelect && cameras.length > 2) {
+        // Clear existing options
+        cameraSelect.innerHTML = '';
+
+        // Add camera options
+        cameras.forEach((camera, index) => {
+          const option = document.createElement('option');
+          option.value = camera.deviceId;
+          option.textContent = camera.label;
+
+          // Select front camera by default
+          if (camera.facingMode === 'user' || index === 0) {
+            option.selected = true;
+          }
+
+          cameraSelect.appendChild(option);
+        });
+
+        this.log('success', `Loaded ${cameras.length} cameras`);
+      } else {
+        // Using default camera options
+      }
+
+    } catch (error) {
+      this.log('error', `Failed to load cameras: ${error.message}`);
+    }
+  }
+
+  /**
+   * Request media permissions for video calls - NEW Task 1.4
+   */
+  async requestVideoPermissions() {
+    try {
+      // Requesting video call permissions
+
+      const granted = await this.voiceService.requestMediaPermissions(true);
+
+      if (granted) {
+        this.showSuccess('Camera and microphone permissions granted');
+        await this.loadAvailableCameras();
+        return true;
+      } else {
+        this.showError('Camera or microphone permission denied');
+        return false;
+      }
+
+    } catch (error) {
+      this.showError(`Permission request failed: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Handle test camera button click - NEW Task 1.4
+   */
+  async handleTestCamera() {
+    try {
+      // Testing camera access
+
+      const success = await this.requestVideoPermissions();
+
+      if (success) {
+        this.log('success', '✅ Camera test completed successfully');
+
+        // Show camera selection if not already visible
+        const cameraSelection = document.getElementById('cameraSelection');
+        if (cameraSelection.classList.contains('hidden')) {
+          cameraSelection.classList.remove('hidden');
+        }
+      } else {
+        this.log('error', '❌ Camera test failed');
+      }
+
+    } catch (error) {
+      this.showError(`Camera test failed: ${error.message}`);
     }
   }
 
@@ -526,22 +712,43 @@ class VoiceCallApp {
    * Show incoming call modal
    */
   showIncomingCallModal(callData) {
-    this.log('success', `🚀 SHOWING INCOMING CALL MODAL for ${callData.callId}`);
+    this.log('success', `🚀 SHOWING INCOMING ${callData.callType?.toUpperCase() || 'VOICE'} CALL MODAL for ${callData.callId}`);
     this.pendingCallData = callData;
 
     // Update modal content
     const callerInfo = document.getElementById('callerInfo');
     const modal = document.getElementById('incomingCallModal');
+    const callTypeIcon = document.getElementById('callTypeIcon');
+    const callTypeTitle = document.getElementById('callTypeTitle');
+    const callTypeDescription = document.getElementById('callTypeDescription');
 
     if (!callerInfo || !modal) {
       this.log('error', `❌ Modal elements not found! callerInfo: ${!!callerInfo}, modal: ${!!modal}`);
       return;
     }
 
+    // Set caller info
     callerInfo.textContent = callData.callerName || callData.callerId;
+
+    // Update modal based on call type
+    const isVideoCall = callData.callType === 'video';
+    if (callTypeIcon) {
+      callTypeIcon.className = isVideoCall
+        ? 'fas fa-video text-6xl text-blue-600 mb-4 call-active'
+        : 'fas fa-phone-alt text-6xl text-blue-600 mb-4 call-active';
+    }
+
+    if (callTypeTitle) {
+      callTypeTitle.textContent = isVideoCall ? 'Incoming Video Call' : 'Incoming Voice Call';
+    }
+
+    if (callTypeDescription) {
+      callTypeDescription.textContent = isVideoCall ? 'Video call with camera' : 'Voice call';
+    }
+
     modal.classList.remove('hidden');
 
-    this.log('success', `✅ Modal shown successfully for call from ${callData.callerName || callData.callerId}`);
+    this.log('success', `✅ ${isVideoCall ? 'Video' : 'Voice'} call modal shown successfully for call from ${callData.callerName || callData.callerId}`);
   }
 
   /**

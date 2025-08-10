@@ -28,6 +28,13 @@ class VoiceCallService {
     this.isMuted = false;
     this.isSpeakerOn = false;
 
+    // Video Call State - NEW for Phase 2
+    this.isVideoCall = false;
+    this.isVideoEnabled = true;
+    this.currentFacingMode = 'user'; // 'user' for front camera, 'environment' for back camera
+    this.localVideoElement = null;
+    this.remoteVideoElement = null;
+
     // ICE Candidate Queue (for candidates generated before callId or remote description is available)
     this.iceCandidateQueue = [];
     this.remoteIceCandidateQueue = [];
@@ -81,8 +88,6 @@ class VoiceCallService {
     this.onError = null;
     this.onDebugUpdate = null;
 
-    this.log('info', 'VoiceCallService initialized');
-
     // Analyze network configuration on startup
     setTimeout(() => {
       this.analyzeNetworkConfig();
@@ -94,8 +99,6 @@ class VoiceCallService {
    */
   async analyzeNetworkConfig() {
     try {
-      this.log('info', '🔍 Analyzing local network configuration...');
-
       // Get local IP using WebRTC with same config as main connection
       const tempPc = new RTCPeerConnection({
         iceServers: this.config.iceServers,
@@ -108,7 +111,7 @@ class VoiceCallService {
         tempPc.onicecandidate = (event) => {
           if (event.candidate) {
             const candidate = event.candidate;
-            console.log(`Local ICE candidate found: ${candidate.candidate}`);
+            // Store candidate without logging
             if (candidate.type === 'host' && candidate.address) {
               const ip = candidate.address;
               if (!localIPs.includes(ip)) {
@@ -144,60 +147,12 @@ class VoiceCallService {
                   firewallRisk = 'Variable';
                 }
 
-                this.log('info', `🌐 Interface: ${ip} (${ipType})`);
-                this.log('info', `   ├─ Protocol: ${candidate.protocol}`);
-                this.log('info', `   ├─ Port: ${candidate.port}`);
-                this.log('info', `   └─ Firewall Risk: ${firewallRisk}`);
-
-                // Specific warnings for testing scenarios
-                if (ip === '127.0.0.1') {
-                  this.log('warning', '⚠️ LOCALHOST DETECTED - Cannot connect between different machines');
-                  this.log('info', '💡 For same-machine testing:');
-                  this.log('info', '   • Use different browsers (Chrome + Firefox)');
-                  this.log('info', '   • Use Incognito mode for one tab');
-                  this.log('info', '   • Check microphone access conflicts');
-                }
+                // Store IP without logging details
               }
             }
           } else {
             // ICE gathering complete
             tempPc.close();
-            this.log('success', `✅ Network analysis complete. Found ${localIPs.length} local interfaces`);
-
-            // Provide recommendations
-            const lanIPs = localIPs.filter(ip =>
-              ip.startsWith('192.168.') ||
-              ip.startsWith('10.') ||
-              (ip.startsWith('172.') && !this.isWSLInterface(ip))
-            );
-
-            if (lanIPs.length > 0) {
-              this.log('success', `🎯 Best IPs for LAN calling: ${lanIPs.join(', ')}`);
-              this.log('info', '📋 Testing recommendations:');
-              this.log('info', '   • For same machine: Use different browsers or Incognito');
-              this.log('info', '   • For different machines: These IPs should work fine');
-            } else {
-              this.log('warning', '⚠️ No suitable LAN interfaces found for peer-to-peer calling');
-              this.log('warning', '🔥 Potential firewall/network issues detected');
-              this.log('info', '📋 Troubleshooting:');
-              this.log('info', '   • Check Windows Firewall settings');
-              this.log('info', '   • Disable VPN if active');
-              this.log('info', '   • Check antivirus firewall settings');
-              this.log('info', '   • Try testing on different network');
-            }
-
-            // Check for testing conflicts
-            const localhostOnly = localIPs.filter(ip => ip === '127.0.0.1').length === localIPs.length;
-            if (localhostOnly) {
-              this.log('error', '🚨 SAME-MACHINE TESTING DETECTED');
-              this.log('warning', 'Chrome may block microphone access for multiple tabs');
-              this.log('info', '🔧 Solutions:');
-              this.log('info', '   1. Open second tab in Incognito mode (Ctrl+Shift+N)');
-              this.log('info', '   2. Use Firefox for second instance');
-              this.log('info', '   3. Test on different computers');
-              this.log('info', '   4. Use different browsers entirely');
-            }
-
             resolve(localIPs);
           }
         };
@@ -324,7 +279,7 @@ class VoiceCallService {
       console.debug('📞 Call initiated data:', data);
 
       // Send any queued ICE candidates immediately
-      console.log('🚀 FLUSHING QUEUED ICE CANDIDATES after getting real callId:', this.currentCallId);
+      // Flush queued ICE candidates
       this.flushIceCandidateQueue();
 
       this.updateDebugInfo();
@@ -380,38 +335,10 @@ class VoiceCallService {
       this.log('debug', `   ├─ Port: ${data.candidate?.port || 'unknown'}`);
       this.log('debug', `   └─ Current call: ${this.currentCallId}`);
 
-      // DETAILED CONSOLE LOG for debugging
-      console.log('📨 RECEIVED REMOTE ICE CANDIDATE:', {
-        callId: data.callId,
-        currentCallId: this.currentCallId,
-        isInitiator: this.isInitiator,
-        callState: this.callState,
-        hasRemoteDescription: !!this.peerConnection?.remoteDescription,
-        candidate: {
-          type: data.candidate?.type,
-          protocol: data.candidate?.protocol,
-          address: data.candidate?.address,
-          port: data.candidate?.port,
-          priority: data.candidate?.priority,
-          foundation: data.candidate?.foundation,
-          candidateString: data.candidate?.candidate,
-          usernameFragment: data.candidate?.usernameFragment,
-          sdpMid: data.candidate?.sdpMid,
-          sdpMLineIndex: data.candidate?.sdpMLineIndex
-        },
-        peerConnectionState: {
-          iceConnectionState: this.peerConnection?.iceConnectionState,
-          signalingState: this.peerConnection?.signalingState,
-          connectionState: this.peerConnection?.connectionState
-        }
-      });
+      // Process remote ICE candidate
 
       if (data.callId !== this.currentCallId) {
         this.log('warning', `❌ ICE candidate for wrong call ID: ${data.callId} vs ${this.currentCallId}`);
-        console.log('❌ IGNORED REMOTE CANDIDATE - Wrong Call ID:', {
-          receivedCallId: data.callId,
-          currentCallId: this.currentCallId
-        });
         return;
       }
 
@@ -563,7 +490,7 @@ class VoiceCallService {
         offerToReceiveVideo: false
       });
 
-      console.log('📞 Creating SDP offer:', offer);
+      this.log('debug', '📞 Creating SDP offer');
 
       // Set local description IMMEDIATELY to avoid SDP mismatch
       await this.peerConnection.setLocalDescription(offer);
@@ -591,6 +518,106 @@ class VoiceCallService {
   }
 
   /**
+   * Start a video call - NEW for Phase 2
+   * @param {string} targetUserId - The user ID to call
+   * @param {string} facingMode - Camera facing mode ('user' or 'environment')
+   */
+  async startVideoCall(targetUserId, facingMode = 'user') {
+    try {
+      if (!this.isConnected) {
+        throw new Error('Not connected to server');
+      }
+
+      if (this.callState !== 'idle') {
+        throw new Error('Already in a call');
+      }
+
+      this.log('info', `Starting video call to user: ${targetUserId}`);
+      this.callState = 'initiating';
+      this.isInitiator = true;
+      this.isVideoCall = true;
+
+      // Get user media with video
+      await this.getUserMedia(true, facingMode);
+
+      // Display local video
+      this.displayLocalVideo();
+
+      // Create the real peer connection
+      this.createPeerConnection();
+
+      // Add local stream to peer connection
+      this.localStream.getTracks().forEach(track => {
+        this.peerConnection.addTrack(track, this.localStream);
+        this.log('debug', `Added ${track.kind} track to peer connection`);
+      });
+
+      // Create SDP offer for video call
+      const offer = await this.peerConnection.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      });
+
+      await this.peerConnection.setLocalDescription(offer);
+      this.log('success', 'Local video call offer created and set');
+
+      this.validateAndLogSDP(offer, 'Local Video Offer');
+
+      // Send video call offer to server
+      this.socket.emit('call:initiate', {
+        targetUserId: targetUserId,
+        callType: 'video',
+        sdpOffer: offer
+      });
+
+      this.log('debug', 'Video call initiate sent to server');
+      this.updateDebugInfo();
+      this.notifyStateChange();
+
+    } catch (error) {
+      this.log('error', `Failed to start video call: ${error.message}`);
+      this.cleanup();
+      throw error;
+    }
+  }
+
+  /**
+   * Display local video stream
+   */
+  displayLocalVideo() {
+    this.localVideoElement = document.getElementById('localVideo');
+
+    if (this.localVideoElement && this.localStream) {
+      this.localVideoElement.srcObject = this.localStream;
+      this.log('success', '📹 Local video stream displayed successfully');
+    } else {
+      this.log('warning', `Local video element not found or no stream available. Element: ${!!this.localVideoElement}, Stream: ${!!this.localStream}`);
+    }
+  }
+
+  /**
+   * Display remote video stream
+   * @param {MediaStream} stream - The remote video stream
+   */
+  displayRemoteVideo(stream) {
+    this.remoteVideoElement = document.getElementById('remoteVideo');
+    const noRemoteVideoOverlay = document.getElementById('noRemoteVideo');
+
+    if (this.remoteVideoElement && stream) {
+      this.remoteVideoElement.srcObject = stream;
+
+      // Hide "waiting for remote video" overlay
+      if (noRemoteVideoOverlay) {
+        noRemoteVideoOverlay.style.display = 'none';
+      }
+
+      this.log('success', '📹 Remote video stream displayed successfully');
+    } else {
+      this.log('warning', `Remote video element not found or no stream. Element: ${!!this.remoteVideoElement}, Stream: ${!!stream}`);
+    }
+  }
+
+  /**
    * Answer an incoming call
    */
   async answerCall(callData) {
@@ -604,8 +631,16 @@ class VoiceCallService {
       this.callState = 'connecting'; // Use connecting state while setting up
       this.isInitiator = false;
 
-      // Get user media
-      await this.getUserMedia();
+      // Determine if this is a video call
+      this.isVideoCall = actualCallData.callType === 'video';
+
+      // Get user media (video if it's a video call)
+      await this.getUserMedia(this.isVideoCall);
+
+      // Display local video if video call
+      if (this.isVideoCall) {
+        this.displayLocalVideo();
+      }
 
       // PeerConnection should already exist from handleIncomingCall
       // If not, create it now (fallback)
@@ -629,12 +664,15 @@ class VoiceCallService {
       this.validateAndLogSDP(actualCallData.sdpOffer, 'Remote Offer');
 
       // Process any queued remote ICE candidates IMMEDIATELY after setting remote description
-      console.log('📨 Processing queued remote ICE candidates... answers');
+      // Process queued remote ICE candidates
       await this.flushRemoteIceCandidateQueue();
 
       // Create and send answer
-      const answer = await this.peerConnection.createAnswer();
-      console.log('📞 Creating SDP answer:', answer);
+      const answer = await this.peerConnection.createAnswer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: this.isVideoCall
+      });
+      this.log('debug', '📞 Creating SDP answer');
 
       await this.peerConnection.setLocalDescription(answer);
       this.log('debug', 'Local description (answer) set');
@@ -727,6 +765,220 @@ class VoiceCallService {
     // For now, we'll just log the state
     this.log('info', `Speaker ${this.isSpeakerOn ? 'on' : 'off'}`);
     return this.isSpeakerOn;
+  }
+
+  /**
+   * Switch camera between front and back - NEW for Phase 2
+   */
+  async switchCamera() {
+    if (!this.localStream || !this.isVideoCall) {
+      this.log('warning', 'No video stream available to switch camera');
+      return false;
+    }
+
+    try {
+      this.log('info', '🔄 Switching camera...');
+
+      // Stop current video track
+      const videoTracks = this.localStream.getVideoTracks();
+      videoTracks.forEach(track => {
+        track.stop();
+        this.localStream.removeTrack(track);
+      });
+
+      // Switch camera facing mode
+      this.currentFacingMode = this.currentFacingMode === 'user' ? 'environment' : 'user';
+      this.log('debug', `Switching to ${this.currentFacingMode} camera`);
+
+      // Get new video stream with switched camera
+      const newVideoStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { min: 320, ideal: 640, max: 1280 },
+          height: { min: 240, ideal: 480, max: 720 },
+          frameRate: { min: 15, ideal: 30, max: 60 },
+          facingMode: this.currentFacingMode
+        }
+      });
+
+      // Add new video track to local stream
+      const newVideoTrack = newVideoStream.getVideoTracks()[0];
+      this.localStream.addTrack(newVideoTrack);
+
+      // Replace video track in peer connection
+      if (this.peerConnection) {
+        const sender = this.peerConnection.getSenders().find(s =>
+          s.track && s.track.kind === 'video'
+        );
+
+        if (sender) {
+          await sender.replaceTrack(newVideoTrack);
+          this.log('success', '✅ Camera switched successfully');
+        } else {
+          this.log('warning', 'No video sender found in peer connection');
+        }
+      }
+
+      // Update local video display
+      this.displayLocalVideo();
+
+      return true;
+    } catch (error) {
+      this.log('error', `❌ Failed to switch camera: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Toggle video on/off - NEW for Phase 2
+   */
+  toggleVideo() {
+    if (!this.localStream || !this.isVideoCall) {
+      this.log('warning', 'No video stream available to toggle');
+      return false;
+    }
+
+    const videoTracks = this.localStream.getVideoTracks();
+    videoTracks.forEach(track => {
+      track.enabled = !track.enabled;
+    });
+
+    this.isVideoEnabled = videoTracks[0]?.enabled || false;
+    this.log('info', `Video ${this.isVideoEnabled ? 'enabled' : 'disabled'}`);
+
+    this.updateVideoUI();
+
+    return this.isVideoEnabled;
+  }
+
+  /**
+   * Update video UI elements - NEW for Phase 2
+   */
+  updateVideoUI() {
+    const toggleBtn = document.getElementById('toggleVideoBtn');
+    const toggleBtn2 = document.getElementById('toggleVideoBtn2');
+    const muteAudioBtn = document.getElementById('muteAudioBtn');
+
+    // Update video button icons
+    const videoIcon = this.isVideoEnabled ? 'fas fa-video' : 'fas fa-video-slash';
+    if (toggleBtn) {
+      const iconElement = toggleBtn.querySelector('i') || toggleBtn;
+      iconElement.className = `${videoIcon} text-sm`;
+    }
+    if (toggleBtn2) {
+      const iconElement = toggleBtn2.querySelector('i') || toggleBtn2;
+      iconElement.className = `${videoIcon}`;
+    }
+
+    // Update audio button if available
+    if (muteAudioBtn) {
+      const audioIcon = this.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+      const iconElement = muteAudioBtn.querySelector('i') || muteAudioBtn;
+      iconElement.className = audioIcon;
+    }
+
+    // Update local video opacity
+    if (this.localVideoElement) {
+      this.localVideoElement.style.opacity = this.isVideoEnabled ? '1' : '0.3';
+    }
+
+    // Update camera mode indicator
+    const switchCameraBtn = document.getElementById('switchCameraBtn');
+    const switchCameraBtn2 = document.getElementById('switchCameraBtn2');
+    const cameraTitle = this.currentFacingMode === 'user' ? 'Switch to Back Camera' : 'Switch to Front Camera';
+
+    if (switchCameraBtn) switchCameraBtn.title = cameraTitle;
+    if (switchCameraBtn2) switchCameraBtn2.title = cameraTitle;
+
+    this.log('debug', `Video UI updated - Video: ${this.isVideoEnabled}, Camera: ${this.currentFacingMode}`);
+  }
+
+  /**
+   * Get available camera devices - NEW Task 1.4
+   */
+  async getAvailableCameras() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+      this.log('debug', `Found ${videoDevices.length} video input devices`);
+
+      return videoDevices.map(device => ({
+        deviceId: device.deviceId,
+        label: device.label || `Camera ${device.deviceId.slice(0, 8)}`,
+        facingMode: this.guessDeviceFacingMode(device.label)
+      }));
+
+    } catch (error) {
+      this.log('error', `Failed to enumerate cameras: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Guess camera facing mode from device label - NEW Task 1.4
+   */
+  guessDeviceFacingMode(label) {
+    const lowerLabel = label.toLowerCase();
+
+    if (lowerLabel.includes('front') || lowerLabel.includes('user') || lowerLabel.includes('selfie')) {
+      return 'user';
+    } else if (lowerLabel.includes('back') || lowerLabel.includes('rear') || lowerLabel.includes('environment')) {
+      return 'environment';
+    }
+
+    return 'unknown';
+  }
+
+  /**
+   * Check camera permissions - NEW Task 1.4
+   */
+  async checkCameraPermissions() {
+    try {
+      if (!navigator.permissions) {
+        this.log('warning', 'Permissions API not supported');
+        return 'unknown';
+      }
+
+      const cameraPermission = await navigator.permissions.query({ name: 'camera' });
+      const micPermission = await navigator.permissions.query({ name: 'microphone' });
+
+      this.log('debug', `Camera permission: ${cameraPermission.state}, Microphone permission: ${micPermission.state}`);
+
+      return {
+        camera: cameraPermission.state,
+        microphone: micPermission.state
+      };
+
+    } catch (error) {
+      this.log('warning', `Permission check failed: ${error.message}`);
+      return 'unknown';
+    }
+  }
+
+  /**
+   * Request camera and microphone permissions - NEW Task 1.4
+   */
+  async requestMediaPermissions(includeVideo = false) {
+    try {
+      this.log('info', `Requesting ${includeVideo ? 'camera and microphone' : 'microphone'} permissions...`);
+
+      const constraints = { audio: true };
+      if (includeVideo) {
+        constraints.video = true;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Stop the test stream immediately
+      stream.getTracks().forEach(track => track.stop());
+
+      this.log('success', `✅ ${includeVideo ? 'Camera and microphone' : 'Microphone'} permissions granted`);
+      return true;
+
+    } catch (error) {
+      this.log('error', `❌ Permission request failed: ${error.message}`);
+      return false;
+    }
   }
 
   /**
@@ -882,68 +1134,109 @@ class VoiceCallService {
   }
 
   /**
-   * Get user media (microphone)
+   * Get user media (microphone and optionally video)
+   * @param {boolean} includeVideo - Whether to include video stream
+   * @param {string} facingMode - Camera facing mode ('user' or 'environment')
    */
-  async getUserMedia() {
+  async getUserMedia(includeVideo = false, facingMode = 'user') {
     try {
       // Check if running in same-origin multiple tabs scenario
       if (typeof navigator !== 'undefined' && navigator.userAgent.includes('Chrome')) {
         this.log('warning', '⚠️ Chrome detected - checking for multiple tab conflicts...');
 
-        // Try to detect if another tab is using microphone
+        // Try to detect if another tab is using microphone/camera
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
           const audioInputs = devices.filter(device => device.kind === 'audioinput');
-          this.log('debug', `Found ${audioInputs.length} audio input devices`);
+          const videoInputs = devices.filter(device => device.kind === 'videoinput');
+          this.log('debug', `Found ${audioInputs.length} audio and ${videoInputs.length} video input devices`);
         } catch (enumError) {
           this.log('warning', `Failed to enumerate devices: ${enumError.message}`);
         }
       }
 
-      this.log('debug', 'Requesting microphone access...');
-      this.localStream = await navigator.mediaDevices.getUserMedia({
+      this.log('debug', `Requesting ${includeVideo ? 'audio + video' : 'audio only'} access...`);
+
+      // Enhanced audio constraints
+      const constraints = {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
           sampleRate: 48000
-        },
-        video: false
-      });
+        }
+      };
 
-      this.log('success', 'Local audio stream acquired successfully');
+      // Add video constraints if needed
+      if (includeVideo) {
+        constraints.video = {
+          width: { min: 320, ideal: 640, max: 1280 },
+          height: { min: 240, ideal: 480, max: 720 },
+          frameRate: { min: 15, ideal: 30, max: 60 },
+          facingMode: facingMode // 'user' for front camera, 'environment' for back camera
+        };
+      }
+
+      this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      this.log('success', `Local ${includeVideo ? 'audio + video' : 'audio'} stream acquired successfully`);
       this.setupAudioVisualization(this.localStream, 'local');
+
+      // Store video capability info
+      this.isVideoCall = includeVideo;
+      this.currentFacingMode = facingMode;
 
       return this.localStream;
     } catch (error) {
       this.log('error', `❌ Failed to get user media: ${error.message}`);
 
-      // Enhanced error handling for common Chrome issues
+      // Enhanced error handling for both audio and video
       if (error.name === 'NotAllowedError') {
-        this.log('error', '🚫 Microphone access denied by user or browser policy');
-        this.log('info', '💡 Possible solutions:');
-        this.log('info', '   • Click the microphone icon in Chrome address bar and allow access');
-        this.log('info', '   • Check if another tab is using the microphone');
-        this.log('info', '   • Try refreshing the page or restarting Chrome');
+        if (includeVideo) {
+          this.log('error', '🚫 Camera/Microphone access denied by user or browser policy');
+          this.log('info', '💡 Possible solutions:');
+          this.log('info', '   • Click the camera/microphone icons in Chrome address bar and allow access');
+          this.log('info', '   • Check if another tab is using the camera/microphone');
+          this.log('info', '   • Try refreshing the page or restarting Chrome');
+
+          // Fallback to audio-only if video fails
+          this.log('info', '🔄 Attempting fallback to audio-only call...');
+          try {
+            return await this.getUserMedia(false);
+          } catch (audioError) {
+            this.log('error', `❌ Audio fallback also failed: ${audioError.message}`);
+            throw audioError;
+          }
+        } else {
+          this.log('error', '🚫 Microphone access denied by user or browser policy');
+          this.log('info', '💡 Possible solutions:');
+          this.log('info', '   • Click the microphone icon in Chrome address bar and allow access');
+          this.log('info', '   • Check if another tab is using the microphone');
+          this.log('info', '   • Try refreshing the page or restarting Chrome');
+        }
       } else if (error.name === 'NotReadableError') {
-        this.log('error', '🔒 Microphone is being used by another application');
+        const deviceType = includeVideo ? 'Camera/Microphone' : 'Microphone';
+        this.log('error', `🔒 ${deviceType} is being used by another application`);
         this.log('info', '💡 Possible solutions:');
-        this.log('info', '   • Close other applications using microphone (Zoom, Teams, etc.)');
-        this.log('info', '   • Close other Chrome tabs that might be using microphone');
+        this.log('info', '   • Close other applications using camera/microphone (Zoom, Teams, etc.)');
+        this.log('info', '   • Close other Chrome tabs that might be using camera/microphone');
         this.log('info', '   • Check Windows sound settings for exclusive mode');
       } else if (error.name === 'NotFoundError') {
-        this.log('error', '🎤 No microphone found on this device');
+        const deviceType = includeVideo ? 'camera or microphone' : 'microphone';
+        this.log('error', `🎤📹 No ${deviceType} found on this device`);
       } else if (error.name === 'OverconstrainedError') {
-        this.log('error', '⚙️ Microphone constraints not supported');
-        this.log('info', '💡 Trying with basic audio constraints...');
+        this.log('error', `⚙️ ${includeVideo ? 'Camera/Microphone' : 'Microphone'} constraints not supported`);
+        this.log('info', '💡 Trying with basic constraints...');
 
         // Fallback: try with basic constraints
         try {
-          this.localStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: false
-          });
-          this.log('success', '✅ Microphone access granted with basic constraints');
+          const basicConstraints = { audio: true };
+          if (includeVideo) {
+            basicConstraints.video = true;
+          }
+
+          this.localStream = await navigator.mediaDevices.getUserMedia(basicConstraints);
+          this.log('success', `✅ ${includeVideo ? 'Camera/Microphone' : 'Microphone'} access granted with basic constraints`);
           this.setupAudioVisualization(this.localStream, 'local');
           return this.localStream;
         } catch (fallbackError) {
@@ -984,16 +1277,31 @@ class VoiceCallService {
 
     // Handle remote stream
     this.peerConnection.ontrack = (event) => {
-      this.log('success', '🎵 Remote stream received');
+      this.log('success', `🎵 Remote ${event.track.kind} stream received`);
       this.remoteStream = event.streams[0];
 
-      // Play remote audio
-      const remoteAudio = document.getElementById('remoteAudio');
-      if (remoteAudio) {
-        remoteAudio.srcObject = this.remoteStream;
+      // Handle audio track
+      if (event.track.kind === 'audio') {
+        const remoteAudio = document.getElementById('remoteAudio');
+        if (remoteAudio) {
+          remoteAudio.srcObject = this.remoteStream;
+          this.log('debug', '🎵 Remote audio connected to element');
+        } else {
+          this.log('warning', '⚠️ Remote audio element not found');
+        }
+        this.setupAudioVisualization(this.remoteStream, 'remote');
       }
 
-      this.setupAudioVisualization(this.remoteStream, 'remote');
+      // Handle video track - NEW for Phase 2
+      if (event.track.kind === 'video') {
+
+        if (this.isVideoCall) {
+          this.displayRemoteVideo(this.remoteStream);
+          this.log('success', '📹 Remote video stream displayed');
+        } else {
+          this.log('info', '📹 Video track received but this is not a video call');
+        }
+      }
     };
 
     // Handle ICE candidates with enhanced debug info and filtering
@@ -1005,31 +1313,10 @@ class VoiceCallService {
         this.log('debug', `🧊 Local ICE candidate generated: ${candidate.type} (${candidate.protocol}) - ${candidate.address || 'no-address'}`);
         this.log('debug', `   └─ Foundation: ${candidate.foundation}, Priority: ${candidate.priority}, Port: ${candidate.port}`);
 
-        // DETAILED CONSOLE LOG for debugging
-        console.log('🚀 LOCAL ICE CANDIDATE GENERATED:', {
-          type: candidate.type,
-          protocol: candidate.protocol,
-          address: candidate.address,
-          port: candidate.port,
-          priority: candidate.priority,
-          foundation: candidate.foundation,
-          component: candidate.component,
-          candidateString: candidate.candidate,
-          usernameFragment: candidate.usernameFragment,
-          sdpMid: candidate.sdpMid,
-          sdpMLineIndex: candidate.sdpMLineIndex,
-          currentCallId: this.currentCallId,
-          isInitiator: this.isInitiator
-        });
-
         // Filter out problematic candidates for LAN connections
         const shouldFilterCandidate = this.shouldFilterIceCandidate(candidate);
         if (shouldFilterCandidate) {
           this.log('warning', `🚫 Filtering out ICE candidate: ${shouldFilterCandidate}`);
-          console.log('❌ FILTERED LOCAL CANDIDATE:', {
-            reason: shouldFilterCandidate,
-            candidate: candidate
-          });
           return;
         }
 
@@ -1040,28 +1327,13 @@ class VoiceCallService {
             candidate: candidate
           });
           this.log('debug', '📤 ICE candidate sent immediately');
-          console.log('📤 SENT LOCAL ICE CANDIDATE:', {
-            callId: this.currentCallId,
-            candidate: {
-              type: candidate.type,
-              protocol: candidate.protocol,
-              address: candidate.address,
-              port: candidate.port,
-              candidateString: candidate.candidate
-            }
-          });
         } else {
           // Queue candidate if callId not available yet
           this.log('debug', '📥 Queueing ICE candidate (waiting for callId)');
           this.iceCandidateQueue.push(candidate);
-          console.log('📥 QUEUED LOCAL ICE CANDIDATE:', {
-            queueLength: this.iceCandidateQueue.length,
-            candidate: candidate
-          });
         }
       } else {
         this.log('debug', '🏁 ICE candidate gathering completed');
-        console.log('🏁 ICE GATHERING COMPLETED for call:', this.currentCallId);
         // Force flush any remaining queued candidates when gathering is complete
         setTimeout(() => {
           this.flushIceCandidateQueue();
@@ -1879,6 +2151,28 @@ class VoiceCallService {
     this.remoteStream = null;
     this.localAnalyzer = null;
     this.remoteAnalyzer = null;
+
+    // Reset video call state - NEW for Phase 2
+    this.isVideoCall = false;
+    this.isVideoEnabled = true;
+    this.currentFacingMode = 'user';
+
+    // Clean up video elements
+    if (this.localVideoElement) {
+      this.localVideoElement.srcObject = null;
+      this.localVideoElement = null;
+    }
+
+    if (this.remoteVideoElement) {
+      this.remoteVideoElement.srcObject = null;
+      this.remoteVideoElement = null;
+    }
+
+    // Reset video overlay - Show "waiting for remote video" message
+    const noRemoteVideoOverlay = document.getElementById('noRemoteVideo');
+    if (noRemoteVideoOverlay) {
+      noRemoteVideoOverlay.style.display = 'flex';
+    }
 
     // Clear ICE candidate queues
     this.iceCandidateQueue = [];
