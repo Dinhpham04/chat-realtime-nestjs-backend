@@ -19,6 +19,7 @@ import { ChunkUploadSessionRepository } from './repositories/chunk-upload-sessio
 import { FileValidationService } from './services/file-validation.service';
 import { StorageService } from './services/storage.service';
 import { ThumbnailGenerationService } from './services/thumbnail-generation.service';
+import { VideoConversionService } from './services/video-conversion.service';
 import { FilesService } from './services/files.service';
 import { ChunkUploadService } from './services/chunk-upload.service';
 
@@ -75,6 +76,7 @@ import { ChunkUploadController } from './controllers/chunk-upload.controller';
         FileValidationService,
         StorageService,
         ThumbnailGenerationService,
+        VideoConversionService,
         FilesService,
         ChunkUploadService,
     ],
@@ -91,6 +93,7 @@ import { ChunkUploadController } from './controllers/chunk-upload.controller';
         FileValidationService,
         StorageService,
         ThumbnailGenerationService,
+        VideoConversionService,
         FilesService,
         ChunkUploadService,
     ],

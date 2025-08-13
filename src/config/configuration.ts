@@ -34,6 +34,16 @@ export default () => ({
     ],
   },
 
+  // Video conversion configuration
+  ffmpeg: {
+    path: process.env.FFMPEG_PATH || undefined, // Auto-detect if not specified
+    probePath: process.env.FFPROBE_PATH || undefined,
+    tempDir: process.env.VIDEO_TEMP_DIR || undefined, // Uses OS temp if not specified
+    quality: process.env.VIDEO_CONVERSION_QUALITY || 'medium', // low, medium, high
+    maxBitrate: process.env.VIDEO_MAX_BITRATE || '2000k',
+    maxResolution: process.env.VIDEO_MAX_RESOLUTION || '1280x720',
+  },
+
   // Enhanced CORS configuration for local development
   cors: {
     origin: getCorsOrigins(), // Dynamic CORS origins including local network

@@ -25,11 +25,104 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+### Features
+
+- 🔐 **Authentication & Authorization**: JWT-based auth with refresh tokens
+- 💬 **Real-time Messaging**: Socket.IO integration for instant messaging
+- 👥 **User Management**: User profiles, friends system, and contact management
+- 📁 **File Management**: File upload, chunked upload, and file sharing
+- 🎥 **Video Conversion**: Automatic conversion of mobile video formats for web preview
+- 📞 **Voice/Video Calls**: WebRTC-based calling system
+- 🌐 **Cross-platform**: API designed for mobile and web clients
+- 📊 **Database**: MongoDB with Mongoose ODM
+- 🚀 **Redis**: Caching and real-time presence management
+
+#### Video Conversion Service
+This application includes an intelligent video conversion service that automatically converts mobile video formats (`.mov`, `.avi`, `.3gp`, etc.) to MP4 for web browser compatibility. The conversion happens on-demand during file preview requests, ensuring optimal performance and storage efficiency.
+
 ## Project setup
 
 ```bash
 $ npm install
 ```
+
+### FFmpeg Installation (Required for Video Conversion)
+
+This project includes a video conversion service that automatically converts mobile video formats (.mov, .avi, .3gp, etc.) to MP4 for web preview compatibility. FFmpeg will be automatically detected after installation.
+
+#### Windows (Recommended)
+```bash
+# Install FFmpeg using Windows Package Manager (easiest method)
+winget install Gyan.FFmpeg.Essentials
+
+# Verify installation
+ffmpeg -version
+```
+
+#### macOS
+```bash
+# Install FFmpeg using Homebrew
+brew install ffmpeg
+
+# Verify installation
+ffmpeg -version
+```
+
+#### Ubuntu/Debian
+```bash
+# Install FFmpeg
+sudo apt update && sudo apt install ffmpeg
+
+# Verify installation
+ffmpeg -version
+```
+
+#### Auto-Detection
+The service automatically detects FFmpeg in:
+- ✅ System PATH
+- ✅ WinGet installations (Windows)
+- ✅ Homebrew installations (macOS)
+- ✅ Common installation directories
+- ✅ Manual configurations via `.env`
+
+#### Manual Configuration (Optional)
+Only needed if auto-detection fails:
+
+```env
+# .env file - Only if auto-detection doesn't work
+FFMPEG_PATH=/path/to/ffmpeg
+FFPROBE_PATH=/path/to/ffprobe
+```
+
+**Note**: After installing FFmpeg, restart the application to enable video conversion features.
+
+## API Documentation
+
+Once the application is running, you can access the Swagger API documentation at:
+- Local: `http://localhost:3000/api/v1/docs`
+- Network: `http://YOUR_LOCAL_IP:3000/api/v1/docs`
+
+### Key API Endpoints
+
+#### Authentication
+- `POST /api/v1/auth/register` - User registration
+- `POST /api/v1/auth/login` - User login
+- `POST /api/v1/auth/refresh-token` - Refresh access token
+
+#### File Management & Video Conversion
+- `POST /api/v1/files/upload` - Upload files (including videos)
+- `GET /api/v1/files/preview/:fileId` - Preview files (auto-converts videos)
+- `GET /api/v1/files/download/:fileId` - Download original files
+
+#### Real-time Messaging
+- `POST /api/v1/messages` - Send message
+- `GET /api/v1/messages/conversation/:id` - Get conversation messages
+- Socket.IO events for real-time communication
+
+#### Voice/Video Calls
+- `POST /api/v1/calls/initiate` - Start a call
+- `PATCH /api/v1/calls/:id/accept` - Accept call
+- WebRTC signaling through Socket.IO
 
 ## Compile and run the project
 
@@ -53,9 +146,57 @@ $ npm run test
 # e2e tests
 $ npm run test:e2e
 
-# test coverage
 $ npm run test:cov
 ```
+
+## Troubleshooting
+
+### FFmpeg Issues
+
+The enhanced auto-detection system should find FFmpeg automatically. If you encounter issues:
+
+1. **Verify FFmpeg Installation**:
+   ```bash
+   ffmpeg -version
+   ffprobe -version
+   ```
+
+2. **Check Auto-Detection Logs**:
+   Look for these success messages in application logs:
+   ```
+   ✅ FFmpeg found in PATH: /path/to/ffmpeg
+   ✅ FFprobe found in PATH: /path/to/ffprobe
+   ```
+
+   Or these detection messages:
+   ```
+   ✅ FFmpeg found via WinGet: /winget/path/to/ffmpeg.exe
+   ✅ FFmpeg found at: /custom/path/to/ffmpeg
+   ```
+
+3. **Manual Override (Last Resort)**:
+   Only if auto-detection completely fails:
+   ```env
+   # .env file
+   FFMPEG_PATH=/full/path/to/ffmpeg
+   FFPROBE_PATH=/full/path/to/ffprobe
+   ```
+
+4. **Restart Application**:
+   After installing FFmpeg, restart the NestJS application.
+
+**Supported Installation Methods**:
+- ✅ WinGet (Windows) - Automatically detected
+- ✅ Homebrew (macOS) - Automatically detected  
+- ✅ APT (Ubuntu/Debian) - Automatically detected
+- ✅ Manual installations in common directories
+- ✅ System PATH installations
+
+### Common Issues
+
+- **Port 3000 already in use**: Change the port in your environment or kill the existing process
+- **MongoDB connection issues**: Ensure MongoDB is running and connection string is correct
+- **Redis connection issues**: Ensure Redis server is running for real-time features
 
 ## Deployment
 

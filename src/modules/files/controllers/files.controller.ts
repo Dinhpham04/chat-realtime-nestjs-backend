@@ -36,6 +36,7 @@ import { Express, Response as ExpressResponse, Request as ExpressRequest } from 
 import { FilesService, UploadFileResult } from '../services/files.service';
 import { FileValidationService, FileInfo } from '../services/file-validation.service';
 import { StorageService } from '../services/storage.service';
+import { VideoConversionService } from '../services/video-conversion.service';
 import {
     UploadSingleFileDto,
     FileMetadataDto,
@@ -95,6 +96,7 @@ export class FilesController {
         private readonly validationService: FileValidationService,
         private readonly storageService: StorageService,
         private readonly redisDownloadTokenService: RedisDownloadTokenService,
+        private readonly videoConversionService: VideoConversionService,
     ) { }
 
     /**
@@ -1164,33 +1166,56 @@ export class FilesController {
     @Public()
     @Get('preview/:fileId')
     @ApiOperation({
-        summary: 'Preview file inline with secure token',
+        summary: 'Preview file inline with secure token and auto video conversion',
         description: `
         Preview file using secure Redis token for inline viewing without download.
         
-        **Supported Preview Types:**
-        - Images: JPEG, PNG, GIF, WebP (inline display)
-        - PDFs: Rendered in browser PDF viewer
-        - Text files: Plain text display
-        - Audio: HTML5 audio player compatible
-        - Videos: HTML5 video player compatible
+        **🎥 AUTOMATIC VIDEO CONVERSION FOR MOBILE COMPATIBILITY:**
         
-        **Features:**
-        - No download - view directly in browser
-        - Optimized for web display
-        - Caching headers for performance
-        - Same security as download endpoints
+        **Mobile Video Formats Supported:**
+        - **Input**: .mov (Apple), .avi (Windows), .3gp (Mobile), .wmv, .mkv, .flv
+        - **Output**: Automatically converted to MP4 (H.264 + AAC) for web preview
+        - **Quality**: Optimized for web streaming with progressive download
+        
+        **How Video Conversion Works:**
+        1. **Upload**: Keep original format (.mov, .avi, etc.)
+        2. **Preview Request**: Automatically detect if conversion needed
+        3. **Real-time Conversion**: Convert to MP4 on-demand for preview
+        4. **Serve**: Return web-compatible MP4 for immediate preview
+        
+        **Supported Preview Types:**
+        - **Videos**: All mobile formats → MP4 conversion for universal preview
+        - **Images**: JPEG, PNG, GIF, WebP (inline display)
+        - **PDFs**: Rendered in browser PDF viewer
+        - **Text files**: Plain text display
+        - **Audio**: HTML5 audio player compatible
+        
+        **Performance Features:**
+        - Progressive download support (faststart)
+        - Quality optimization for web
+        - Conversion caching for repeated requests
+        - Fallback to download if conversion fails
+        
+        **Mobile App Integration:**
+        \`\`\`javascript
+        // Mobile app can directly preview any video format
+        const previewUrl = \`/api/v1/files/preview/\${fileId}?token=\${token}\`;
+        
+        // Works with HTML5 video element
+        <video controls src={previewUrl} />
+        
+        // Conversion happens transparently on server
+        \`\`\`
+        
+        **Conversion Info Headers:**
+        - \`X-Video-Converted: true\` - Video was converted for preview
+        - \`X-Original-Format: video/quicktime\` - Original file format
         
         **Use Cases:**
-        - Image galleries and previews
-        - Document quick view
-        - Media player integration
-        - File thumbnails and previews
-        
-        **Response Headers:**
-        - Content-Disposition: inline (not attachment)
-        - Cache-Control: optimized for browser caching
-        - Content-Type: original file MIME type
+        - Mobile video sharing and preview
+        - Cross-platform video compatibility
+        - Instant video preview without app-specific codecs
+        - Universal video player integration
         `,
     })
     @ApiParam({
@@ -1279,22 +1304,79 @@ export class FilesController {
             const file = await this.filesService.getFile(fileId, tokenData.userId);
 
             // Get file content
-            const fileBuffer = await this.storageService.downloadFile(fileId);
+            let fileBuffer = await this.storageService.downloadFile(fileId);
+            let mimeType = file.mimeType;
+            let isConverted = false;
+            this.logger.debug("mimeType to conversion: ", mimeType);
+
+            // Check if video needs conversion for preview
+            if (file.mimeType.startsWith('video/') && this.videoConversionService.needsConversion(file.mimeType)) {
+                this.logger.log(`Converting video for preview: ${file.mimeType} → MP4`);
+
+                try {
+                    const conversionResult = await this.videoConversionService.convertToMp4(
+                        fileBuffer,
+                        file.mimeType,
+                        { quality: 'medium' } // Optimize for web preview
+                    );
+
+                    if (conversionResult.success && conversionResult.outputBuffer) {
+                        fileBuffer = conversionResult.outputBuffer;
+                        mimeType = 'video/mp4';
+                        isConverted = true;
+
+                        this.logger.log(`Video conversion successful: ${file.fileName} (${this.formatBytes(conversionResult.originalSize)} → ${this.formatBytes(conversionResult.convertedSize)}, ${conversionResult.processingTime}ms)`);
+                    } else {
+                        this.logger.warn(`Video conversion failed for ${fileId}: ${conversionResult.error}`);
+                        // Fall back to original file
+                    }
+                } catch (conversionError) {
+                    this.logger.error(`Video conversion error for ${fileId}: ${conversionError.message}`);
+                    // Fall back to original file
+                }
+            }
+
+            // Check if video format is still not previewable after conversion attempt
+            if (file.mimeType.startsWith('video/') && !isConverted && !this.videoConversionService.isWebCompatible(file.mimeType)) {
+                // Return error response for unsupported video formats
+                res.status(400).json({
+                    error: 'Video format not supported for preview',
+                    mimeType: file.mimeType,
+                    fileName: file.fileName,
+                    suggestion: 'Please download the file to view it, or use a media player that supports this format',
+                    supportedFormats: ['video/mp4', 'video/webm', 'video/ogg']
+                });
+                return;
+            }
 
             // Set appropriate headers for inline viewing
-            res.setHeader('Content-Type', file.mimeType);
+            res.setHeader('Content-Type', mimeType);
             res.setHeader('Content-Length', fileBuffer.length);
             res.setHeader('Content-Disposition', 'inline');
             res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
 
+            // Add conversion info headers
+            if (isConverted) {
+                res.setHeader('X-Video-Converted', 'true');
+                res.setHeader('X-Original-Format', file.mimeType);
+            }
+
             // Send file
             res.send(fileBuffer);
 
-            this.logger.log(`File ${fileId} previewed by user ${tokenData.userId}`);
+            this.logger.log(`File ${fileId} previewed by user ${tokenData.userId}${isConverted ? ' (converted)' : ''}`);
         } catch (error) {
             this.logger.error(`Preview failed for file ${fileId}: ${error.message}`);
             throw error;
         }
+    }
+
+    // Helper method for formatting file sizes
+    private formatBytes(bytes: number): string {
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        if (bytes === 0) return '0 Bytes';
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
     }
 
     /**
