@@ -1166,7 +1166,7 @@ export class FilesController {
     @Public()
     @Get('preview/:fileId')
     @ApiOperation({
-        summary: 'Preview file inline with secure token and auto video conversion',
+        summary: 'Preview file inline with secure token, auto video conversion and HTTP Range support',
         description: `
         Preview file using secure Redis token for inline viewing without download.
         
@@ -1177,45 +1177,67 @@ export class FilesController {
         - **Output**: Automatically converted to MP4 (H.264 + AAC) for web preview
         - **Quality**: Optimized for web streaming with progressive download
         
-        **How Video Conversion Works:**
-        1. **Upload**: Keep original format (.mov, .avi, etc.)
-        2. **Preview Request**: Automatically detect if conversion needed
-        3. **Real-time Conversion**: Convert to MP4 on-demand for preview
-        4. **Serve**: Return web-compatible MP4 for immediate preview
+        **📱 REACT NATIVE EXPO STREAMING SUPPORT:**
         
-        **Supported Preview Types:**
-        - **Videos**: All mobile formats → MP4 conversion for universal preview
-        - **Images**: JPEG, PNG, GIF, WebP (inline display)
-        - **PDFs**: Rendered in browser PDF viewer
-        - **Text files**: Plain text display
-        - **Audio**: HTML5 audio player compatible
+        **HTTP Range Requests:**
+        - **Accept-Ranges: bytes** - Enables video seeking/scrubbing
+        - **Status 206 Partial Content** - Returns requested byte ranges
+        - **Range Header Support** - Handles "bytes=start-end" requests
+        - **Video Streaming** - Smooth playback with seek functionality
+        
+        **Range Request Examples:**
+        - \`Range: bytes=0-1023\` - First 1024 bytes
+        - \`Range: bytes=1024-\` - From byte 1024 to end
+        - \`Range: bytes=-1024\` - Last 1024 bytes
+        
+        **How Video Streaming Works:**
+        1. **Initial Request**: Gets video metadata and first chunk
+        2. **Range Requests**: Client requests specific byte ranges for seeking
+        3. **206 Response**: Server returns partial content with correct headers
+        4. **Smooth Playback**: Enables pause, play, seek in React Native
+        
+        **React Native Expo Integration:**
+        \`\`\`javascript
+        import { Video } from 'expo-av';
+        
+        // Video component with full streaming support
+        <Video
+          source={{ uri: previewUrl }}
+          useNativeControls
+          resizeMode="contain"
+          isLooping={false}
+          shouldPlay={false}
+          style={{ width: 300, height: 200 }}
+        />
+        
+        // Range requests handled automatically by expo-av
+        // Seeking, scrubbing, and progressive loading work seamlessly
+        \`\`\`
         
         **Performance Features:**
         - Progressive download support (faststart)
-        - Quality optimization for web
+        - Range request optimization for mobile
+        - Efficient seeking without full download
         - Conversion caching for repeated requests
         - Fallback to download if conversion fails
         
-        **Mobile App Integration:**
-        \`\`\`javascript
-        // Mobile app can directly preview any video format
-        const previewUrl = \`/api/v1/files/preview/\${fileId}?token=\${token}\`;
+        **Headers for Streaming:**
+        - \`Accept-Ranges: bytes\` - Indicates range support
+        - \`Content-Range: bytes start-end/total\` - Range information
+        - \`Content-Length: chunkSize\` - Partial content size
+        - \`X-Video-Converted: true\` - Conversion indicator
         
-        // Works with HTML5 video element
-        <video controls src={previewUrl} />
-        
-        // Conversion happens transparently on server
-        \`\`\`
-        
-        **Conversion Info Headers:**
-        - \`X-Video-Converted: true\` - Video was converted for preview
-        - \`X-Original-Format: video/quicktime\` - Original file format
+        **Status Codes:**
+        - \`200 OK\` - Full file response
+        - \`206 Partial Content\` - Range request response
+        - \`416 Range Not Satisfiable\` - Invalid range
         
         **Use Cases:**
         - Mobile video sharing and preview
         - Cross-platform video compatibility
         - Instant video preview without app-specific codecs
-        - Universal video player integration
+        - Universal video player integration with seek support
+        - Efficient mobile data usage with partial loading
         `,
     })
     @ApiParam({
@@ -1239,8 +1261,15 @@ export class FilesController {
     })
     @ApiResponse({
         status: HttpStatus.OK,
-        description: 'File preview loaded successfully',
+        description: 'Full file preview loaded successfully (status 200)',
         content: {
+            'video/mp4': {
+                schema: {
+                    type: 'string',
+                    format: 'binary'
+                },
+                example: '[Full video content for complete download]'
+            },
             'image/jpeg': {
                 schema: {
                     type: 'string',
@@ -1264,19 +1293,88 @@ export class FilesController {
         },
         headers: {
             'Content-Type': {
-                description: 'Original file MIME type',
-                schema: { type: 'string' }
+                description: 'File MIME type',
+                schema: { type: 'string', example: 'video/mp4' }
+            },
+            'Content-Length': {
+                description: 'Full file size in bytes',
+                schema: { type: 'integer', example: 15728640 }
             },
             'Content-Disposition': {
                 description: 'Set to "inline" for browser display',
                 schema: { type: 'string', example: 'inline' }
             },
+            'Accept-Ranges': {
+                description: 'Indicates server supports range requests',
+                schema: { type: 'string', example: 'bytes' }
+            },
             'Cache-Control': {
                 description: 'Browser caching settings',
+                schema: { type: 'string', example: 'private, max-age=3600' }
+            },
+            'X-Video-Converted': {
+                description: 'Indicates if video was converted',
+                schema: { type: 'string', example: 'true' }
+            },
+            'X-Original-Format': {
+                description: 'Original video format before conversion',
+                schema: { type: 'string', example: 'video/quicktime' }
+            }
+        }
+    })
+    @ApiResponse({
+        status: 206,
+        description: 'Partial content for video streaming/seeking (Range Request)',
+        content: {
+            'video/mp4': {
+                schema: {
+                    type: 'string',
+                    format: 'binary'
+                },
+                example: '[Partial video content chunk for streaming]'
+            }
+        },
+        headers: {
+            'Content-Type': {
+                description: 'Video MIME type',
+                schema: { type: 'string', example: 'video/mp4' }
+            },
+            'Content-Length': {
+                description: 'Size of partial content in bytes',
+                schema: { type: 'integer', example: 1048576 }
+            },
+            'Content-Range': {
+                description: 'Byte range being returned',
+                schema: { type: 'string', example: 'bytes 0-1048575/15728640' }
+            },
+            'Accept-Ranges': {
+                description: 'Confirms range request support',
+                schema: { type: 'string', example: 'bytes' }
+            },
+            'Cache-Control': {
+                description: 'Caching policy for video chunks',
                 schema: { type: 'string', example: 'private, max-age=3600' }
             }
         }
     })
+    @ApiResponse({
+        status: 416,
+        description: 'Range Not Satisfiable - Invalid byte range requested',
+        headers: {
+            'Content-Range': {
+                description: 'Valid range information',
+                schema: { type: 'string', example: 'bytes */15728640' }
+            }
+        },
+        schema: {
+            example: {
+                error: 'Range Not Satisfiable',
+                message: 'The requested byte range is invalid',
+                validRange: 'bytes 0-15728639'
+            }
+        }
+    })
+
     async previewFile(
         @Param('fileId') fileId: string,
         @Query('token') token: string,
@@ -1349,11 +1447,57 @@ export class FilesController {
                 return;
             }
 
-            // Set appropriate headers for inline viewing
+            const fileSize = fileBuffer.length;
+            const range = req.headers.range;
+
+            // Handle Range Requests for video streaming/seeking
+            if (range && mimeType.startsWith('video/')) {
+                this.logger.debug(`Range request for video: ${range}`);
+
+                // Parse range header (e.g., "bytes=0-1023" or "bytes=1024-")
+                const ranges = this.parseRangeHeader(range, fileSize);
+
+                if (!ranges || ranges.length === 0) {
+                    // Invalid range
+                    res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
+                    res.end();
+                    return;
+                }
+
+                // Handle single range (most common case)
+                const { start, end } = ranges[0];
+                const contentLength = end - start + 1;
+                const chunk = fileBuffer.slice(start, end + 1);
+
+                // Set headers for partial content (206)
+                res.status(206);
+                res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+                res.setHeader('Accept-Ranges', 'bytes');
+                res.setHeader('Content-Length', contentLength);
+                res.setHeader('Content-Type', mimeType);
+                res.setHeader('Cache-Control', 'private, max-age=3600');
+
+                // Add conversion info headers
+                if (isConverted) {
+                    res.setHeader('X-Video-Converted', 'true');
+                    res.setHeader('X-Original-Format', file.mimeType);
+                }
+
+                res.send(chunk);
+                this.logger.log(`Range request served: ${start}-${end}/${fileSize} for user ${tokenData.userId}`);
+                return;
+            }
+
+            // Set appropriate headers for full file response
             res.setHeader('Content-Type', mimeType);
-            res.setHeader('Content-Length', fileBuffer.length);
+            res.setHeader('Content-Length', fileSize);
             res.setHeader('Content-Disposition', 'inline');
             res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
+
+            // Always add Accept-Ranges header for video files
+            if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
+                res.setHeader('Accept-Ranges', 'bytes');
+            }
 
             // Add conversion info headers
             if (isConverted) {
@@ -1361,7 +1505,7 @@ export class FilesController {
                 res.setHeader('X-Original-Format', file.mimeType);
             }
 
-            // Send file
+            // Send full file
             res.send(fileBuffer);
 
             this.logger.log(`File ${fileId} previewed by user ${tokenData.userId}${isConverted ? ' (converted)' : ''}`);
@@ -1369,6 +1513,62 @@ export class FilesController {
             this.logger.error(`Preview failed for file ${fileId}: ${error.message}`);
             throw error;
         }
+    }
+
+    /**
+     * Parse Range header and return array of ranges
+     * Supports: "bytes=0-1023", "bytes=1024-", "bytes=-1024"
+     */
+    private parseRangeHeader(range: string, fileSize: number): Array<{ start: number; end: number }> | null {
+        if (!range.startsWith('bytes=')) {
+            return null;
+        }
+
+        const ranges: Array<{ start: number; end: number }> = [];
+        const rangeSpec = range.substring(6); // Remove "bytes="
+        const rangeParts = rangeSpec.split(',');
+
+        for (const part of rangeParts) {
+            const rangeDef = part.trim();
+            const rangeParts = rangeDef.split('-');
+
+            if (rangeParts.length !== 2) {
+                continue;
+            }
+
+            const [startStr, endStr] = rangeParts;
+            let start: number, end: number;
+
+            if (startStr === '') {
+                // Suffix range: "-1024" means last 1024 bytes
+                const suffixLength = parseInt(endStr, 10);
+                if (isNaN(suffixLength)) continue;
+
+                start = Math.max(0, fileSize - suffixLength);
+                end = fileSize - 1;
+            } else if (endStr === '') {
+                // Start range: "1024-" means from byte 1024 to end
+                start = parseInt(startStr, 10);
+                if (isNaN(start)) continue;
+
+                end = fileSize - 1;
+            } else {
+                // Full range: "0-1023"
+                start = parseInt(startStr, 10);
+                end = parseInt(endStr, 10);
+
+                if (isNaN(start) || isNaN(end)) continue;
+            }
+
+            // Validate range
+            if (start < 0 || end >= fileSize || start > end) {
+                continue;
+            }
+
+            ranges.push({ start, end });
+        }
+
+        return ranges.length > 0 ? ranges : null;
     }
 
     // Helper method for formatting file sizes
