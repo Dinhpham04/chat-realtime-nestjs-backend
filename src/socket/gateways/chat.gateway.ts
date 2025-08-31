@@ -2657,6 +2657,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             // This would integrate with friends/contacts service
 
             const presence = await this.presenceService.getUserPresence(data.userId);
+            this.logger.debug(`Presence for user ${data.userId}:`, presence);
 
             if (presence) {
                 client.emit('user_presence_response', {

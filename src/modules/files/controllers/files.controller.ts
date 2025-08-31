@@ -243,7 +243,7 @@ export class FilesController {
             message: result.isNew ? 'File uploaded successfully' : 'File already exists, returning existing file',
             data: {
                 fileId: result.fileId,
-                fileName: result.fileName,
+                fileName: result.originalName,
                 originalName: result.originalName,
                 fileSize: result.fileSize,
                 mimeType: result.mimeType,
@@ -408,7 +408,7 @@ export class FilesController {
 
                 uploadedFiles.push({
                     fileId: result.fileId,
-                    fileName: result.fileName,
+                    fileName: result.originalName,
                     originalName: result.originalName,
                     fileSize: result.fileSize,
                     mimeType: result.mimeType,

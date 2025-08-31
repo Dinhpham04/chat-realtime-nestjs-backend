@@ -131,7 +131,9 @@ export function getCorsOrigins(): string[] {
       'https://*.ngrok-free.app',
       'https://*.ngrok-free.app/voice-call-test.html',
       'http://localhost:*',
-      `http://${localIP}:*`
+      'http://localhost:5173',
+      `http://${localIP}:*`,
+      `*`
     ];
 
     return [...baseOrigins, ...localNetworkOrigins];
