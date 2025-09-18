@@ -21,11 +21,15 @@ import {
   AddParticipantsResult,
   UpdateParticipantRoleResult,
   RemoveParticipantResult,
-  LeaveConversationResult
+  LeaveConversationResult,
+  ConversationFilesResult
 } from './interfaces/conversations-service.interface';
 import { IUsersService } from '../../users/services/interfaces/users-service.interface';
 import { IConversationRepository } from '../repositories/interfaces/conversation-repository.interface';
 import { ConversationType, ParticipantRole, CreateConversationData, UpdateConversationData, ConversationQuery, ConversationWithParticipants, AddParticipantData } from '../types/conversation.types';
+import { ConversationFileType } from '../dto/conversation-files.dto';
+import { MessagesService } from '../../messages/services/messages.service';
+import { FilesService } from '../../files/services/files.service';
 
 @Injectable()
 export class ConversationsService implements IConversationsService {
@@ -37,6 +41,12 @@ export class ConversationsService implements IConversationsService {
 
     @Inject('IUsersService')
     private readonly usersService: IUsersService,
+
+    @Inject(forwardRef(() => MessagesService))
+    private readonly messagesService: MessagesService,
+
+    @Inject(forwardRef(() => FilesService))
+    private readonly filesService: FilesService,
   ) { }
 
   /**
@@ -935,5 +945,973 @@ export class ConversationsService implements IConversationsService {
       this.logger.error(`Failed to check membership for user ${userId} in conversation ${conversationId}:`, error);
       return false; // Fail safe - deny access on error
     }
+  }
+
+  /**
+   * Get all files/media from a conversation
+   * 
+   * 🎯 Purpose: Retrieve all files shared in a conversation with filtering and pagination
+   * 📱 Mobile-First: Optimized for mobile gallery views
+   * 🔒 Security: Validates user membership before access
+   * 
+   * Business Logic:
+   * 1. Validate user is member of conversation
+   * 2. Query messages with attachments in the conversation
+   * 3. Extract and deduplicate file attachments
+   * 4. Apply filtering (file type, size, search)
+   * 5. Sort and paginate results
+   * 6. Include file metadata and uploader info
+   * 7. Generate download URLs
+   * 8. Return structured response with statistics
+   */
+  async getConversationFiles(
+    conversationId: string,
+    userId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      fileType?: string;
+      sortBy?: string;
+      search?: string;
+      minSize?: number;
+      maxSize?: number;
+    } = {}
+  ): Promise<ConversationFilesResult> {
+    try {
+      this.logger.log(`Getting files for conversation ${conversationId}, user ${userId}`);
+
+      // 1. Validate user exists
+      const user = await this.usersService.findById(userId);
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      // 2. Validate conversation exists and user is member
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation) {
+        throw new NotFoundException('Conversation not found');
+      }
+
+      const isMember = await this.isUserMemberOfConversation(userId, conversationId);
+      if (!isMember) {
+        throw new ForbiddenException('You are not a member of this conversation');
+      }
+
+      // 3. Set default options and validate
+      const {
+        page = 1,
+        limit = 20,
+        fileType = 'all',
+        sortBy = 'newest',
+        search,
+        minSize,
+        maxSize
+      } = options;
+
+      // Validate pagination
+      if (page < 1) {
+        throw new BadRequestException('Page must be greater than 0');
+      }
+      if (limit < 1 || limit > 100) {
+        throw new BadRequestException('Limit must be between 1 and 100');
+      }
+
+      // 4. Get all messages from conversation with large pagination to find attachments
+      // We'll process in batches to avoid memory issues
+      const allFiles: any[] = [];
+      const filesMap = new Map(); // For deduplication
+      let messagePage = 1;
+      const messagesPerBatch = 100;
+      let hasMoreMessages = true;
+
+      this.logger.debug(`Starting to scan messages for files in conversation ${conversationId}`);
+
+      while (hasMoreMessages) {
+        try {
+          // Get messages from this conversation
+          const messagesResult = await this.messagesService.getConversationMessages(
+            conversationId,
+            { page: messagePage, limit: messagesPerBatch },
+            { userId, deviceId: undefined }
+          );
+
+          if (!messagesResult.messages || messagesResult.messages.length === 0) {
+            hasMoreMessages = false;
+            break;
+          }
+
+          // Process each message to extract file attachments
+          for (const message of messagesResult.messages) {
+            if (message.attachments && message.attachments.length > 0) {
+              // Get uploader info (sender)
+              const uploader = message.sender || await this.usersService.findById(message.senderId);
+
+              for (const attachment of message.attachments) {
+                // Avoid duplicates (same file attached to multiple messages)
+                const fileKey = `${attachment.fileId}_${message.id}`;
+                if (filesMap.has(fileKey)) {
+                  continue;
+                }
+
+                // Determine file type category
+                const fileTypeCategory = this.determineFileType(attachment.mimeType);
+
+                // Create file entry
+                const fileEntry = {
+                  id: attachment.fileId,
+                  messageId: message.id,
+                  originalName: attachment.fileName,
+                  fileName: attachment.fileName,
+                  mimeType: attachment.mimeType,
+                  fileSize: attachment.fileSize,
+                  fileType: fileTypeCategory,
+                  fileUrl: attachment.downloadUrl,
+                  thumbnailUrl: attachment.thumbnailUrl,
+                  uploadedBy: {
+                    id: uploader?.id || message.senderId,
+                    fullName: uploader?.fullName || 'Unknown User',
+                    avatarUrl: uploader?.avatarUrl
+                  },
+                  uploadedAt: new Date(message.createdAt),
+                  messageTimestamp: new Date(message.createdAt),
+                  messageContent: message.content,
+                  downloadCount: 0, // TODO: Implement download tracking
+                  metadata: {} // TODO: Add metadata from FilesService
+                };
+
+                filesMap.set(fileKey, fileEntry);
+                allFiles.push(fileEntry);
+              }
+            }
+          }
+
+          // Check if we have more messages
+          hasMoreMessages = messagesResult.pagination.hasNext;
+          messagePage++;
+
+          this.logger.debug(`Processed page ${messagePage - 1}, found ${allFiles.length} files so far`);
+
+        } catch (error) {
+          this.logger.warn(`Failed to get messages page ${messagePage}: ${error.message}`);
+          hasMoreMessages = false;
+        }
+      }
+
+      this.logger.debug(`Found total ${allFiles.length} files in conversation ${conversationId}`);
+
+      // 5. Apply filtering
+      let filteredFiles = [...allFiles];
+
+      // Filter by file type
+      if (fileType && fileType !== 'all') {
+        filteredFiles = filteredFiles.filter(file => file.fileType === fileType);
+      }
+
+      // Filter by search term
+      if (search) {
+        const searchLower = search.toLowerCase();
+        filteredFiles = filteredFiles.filter(file =>
+          file.originalName?.toLowerCase().includes(searchLower) ||
+          file.messageContent?.toLowerCase().includes(searchLower) ||
+          file.uploadedBy.fullName?.toLowerCase().includes(searchLower)
+        );
+      }
+
+      // Filter by file size
+      if (minSize !== undefined) {
+        filteredFiles = filteredFiles.filter(file => file.fileSize >= minSize);
+      }
+      if (maxSize !== undefined) {
+        filteredFiles = filteredFiles.filter(file => file.fileSize <= maxSize);
+      }
+
+      // 6. Sort files
+      filteredFiles = this.sortFiles(filteredFiles, sortBy);
+
+      // 7. Apply pagination
+      const total = filteredFiles.length;
+      const totalPages = Math.ceil(total / limit);
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedFiles = filteredFiles.slice(startIndex, endIndex);
+
+      // 8. Enhance files with additional metadata from FilesService
+      const enhancedFiles = await Promise.all(
+        paginatedFiles.map(async (file) => {
+          try {
+            // Generate fresh download URLs through FilesService
+            const downloadUrl = await this.filesService.generateDownloadUrl(
+              file.id,
+              userId,
+              { expiresIn: 24 * 60 * 60 } // 24 hours
+            );
+
+            // Generate thumbnail URL if applicable
+            let thumbnailUrl = file.thumbnailUrl;
+            if (this.shouldHaveThumbnail(file.mimeType)) {
+              try {
+                // Generate preview URL for thumbnail (inline display)
+                thumbnailUrl = await this.filesService.generateThumbnailPreviewUrl(
+                  file.id,
+                  userId,
+                  24 * 60 * 60 // 24 hours
+                );
+              } catch (error) {
+                this.logger.warn(`Failed to generate thumbnail URL for file ${file.id}: ${error.message}`);
+              }
+            }
+
+            return {
+              ...file,
+              fileUrl: downloadUrl,
+              thumbnailUrl,
+              downloadCount: 0, // TODO: Get real download count from FilesService
+            };
+          } catch (error) {
+            this.logger.warn(`Failed to enhance file ${file.id}: ${error.message}`);
+            return file; // Return original file if enhancement fails
+          }
+        })
+      );
+
+      // 9. Calculate statistics
+      const fileTypeStats = this.calculateFileTypeStats(filteredFiles);
+      const totalStorageUsed = this.calculateTotalStorageUsed(filteredFiles);
+
+      // 10. Build result
+      const result: ConversationFilesResult = {
+        files: enhancedFiles,
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+        fileTypeStats,
+        totalStorageUsed
+      };
+
+      this.logger.log(`Retrieved ${enhancedFiles.length} files for conversation ${conversationId} (page ${page}/${totalPages})`);
+      return result;
+
+    } catch (error) {
+      this.logger.error(`Failed to get conversation files: ${error.message}`, error.stack);
+
+      if (error instanceof NotFoundException ||
+        error instanceof ForbiddenException ||
+        error instanceof BadRequestException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException('Failed to retrieve conversation files');
+    }
+  }
+
+  /**
+   * Build MongoDB aggregation pipeline for file extraction
+   * @private
+   */
+  private buildFileAggregationPipeline(
+    conversationId: string,
+    filters: {
+      fileType?: string;
+      search?: string;
+      minSize?: number;
+      maxSize?: number;
+      sortBy?: string;
+      page: number;
+      limit: number;
+    }
+  ): any[] {
+    const pipeline: any[] = [
+      // Stage 1: Match messages in conversation with attachments
+      {
+        $match: {
+          conversationId: new Types.ObjectId(conversationId),
+          'attachments.0': { $exists: true }, // Has at least one attachment
+          deletedAt: { $exists: false } // Not deleted
+        }
+      },
+
+      // Stage 2: Unwind attachments to process each file separately
+      {
+        $unwind: '$attachments'
+      },
+
+      // Stage 3: Lookup user information for uploaders
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'senderId',
+          foreignField: '_id',
+          as: 'uploader'
+        }
+      },
+
+      // Stage 4: Unwind uploader (should be single user)
+      {
+        $unwind: '$uploader'
+      },
+
+      // Stage 5: Add computed fields
+      {
+        $addFields: {
+          'attachments.messageId': '$_id',
+          'attachments.messageTimestamp': '$createdAt',
+          'attachments.messageContent': '$content',
+          'attachments.uploadedBy': {
+            id: '$uploader._id',
+            fullName: '$uploader.fullName',
+            avatarUrl: '$uploader.avatarUrl'
+          },
+          // Map MIME types to file categories
+          'attachments.fileType': {
+            $switch: {
+              branches: [
+                {
+                  case: { $regexMatch: { input: '$attachments.mimeType', regex: '^image/' } },
+                  then: 'image'
+                },
+                {
+                  case: { $regexMatch: { input: '$attachments.mimeType', regex: '^video/' } },
+                  then: 'video'
+                },
+                {
+                  case: { $regexMatch: { input: '$attachments.mimeType', regex: '^audio/' } },
+                  then: 'audio'
+                },
+                {
+                  case: {
+                    $or: [
+                      { $regexMatch: { input: '$attachments.mimeType', regex: 'pdf' } },
+                      { $regexMatch: { input: '$attachments.mimeType', regex: 'document' } },
+                      { $regexMatch: { input: '$attachments.mimeType', regex: 'text/' } },
+                      { $regexMatch: { input: '$attachments.mimeType', regex: 'application/' } }
+                    ]
+                  },
+                  then: 'document'
+                }
+              ],
+              default: 'other'
+            }
+          }
+        }
+      }
+    ];
+
+    // Stage 6: Apply filters
+    const matchConditions: any = {};
+
+    if (filters.fileType && filters.fileType !== 'all') {
+      matchConditions['attachments.fileType'] = filters.fileType;
+    }
+
+    if (filters.search) {
+      matchConditions['attachments.originalName'] = {
+        $regex: filters.search,
+        $options: 'i'
+      };
+    }
+
+    if (filters.minSize) {
+      matchConditions['attachments.fileSize'] = { $gte: filters.minSize };
+    }
+
+    if (filters.maxSize) {
+      if (matchConditions['attachments.fileSize']) {
+        matchConditions['attachments.fileSize'].$lte = filters.maxSize;
+      } else {
+        matchConditions['attachments.fileSize'] = { $lte: filters.maxSize };
+      }
+    }
+
+    if (Object.keys(matchConditions).length > 0) {
+      pipeline.push({ $match: matchConditions });
+    }
+
+    // Stage 7: Sort
+    const sortField = this.getSortField(filters.sortBy || 'newest');
+    pipeline.push({ $sort: sortField });
+
+    // Stage 8: Project final structure
+    pipeline.push({
+      $project: {
+        _id: 0,
+        id: '$attachments._id',
+        messageId: '$attachments.messageId',
+        originalName: '$attachments.originalName',
+        fileName: '$attachments.fileName',
+        mimeType: '$attachments.mimeType',
+        fileSize: '$attachments.fileSize',
+        fileType: '$attachments.fileType',
+        fileUrl: '$attachments.fileUrl',
+        thumbnailUrl: '$attachments.thumbnailUrl',
+        uploadedBy: '$attachments.uploadedBy',
+        uploadedAt: '$attachments.uploadedAt',
+        messageTimestamp: '$attachments.messageTimestamp',
+        messageContent: '$attachments.messageContent',
+        downloadCount: '$attachments.downloadCount',
+        metadata: '$attachments.metadata'
+      }
+    });
+
+    return pipeline;
+  }
+
+  /**
+   * Execute file aggregation with smart mock data simulation
+   * @private
+   */
+  private async executeFileAggregation(pipeline: any[]): Promise<{
+    files: any[];
+    allFiles: any[];
+    total: number;
+  }> {
+    try {
+      // Check if we have Messages collection available
+      const useRealData = process.env.USE_REAL_MESSAGES_DATA === 'true' && this.hasMessagesService();
+
+      if (useRealData) {
+        return await this.executeRealFileAggregation(pipeline);
+      } else {
+        return await this.executeMockFileAggregation(pipeline);
+      }
+    } catch (error) {
+      this.logger.error('File aggregation failed, falling back to mock data', error.stack);
+      return await this.executeMockFileAggregation(pipeline);
+    }
+  }
+
+  /**
+   * Execute real MongoDB aggregation (when Messages collection is available)
+   * @private
+   */
+  private async executeRealFileAggregation(pipeline: any[]): Promise<{
+    files: any[];
+    allFiles: any[];
+    total: number;
+  }> {
+    // TODO: Implement when MessagesService is properly injected
+    /*
+    const messageModel = this.messagesService.getModel(); // Get MongoDB model
+    
+    // Clone pipeline for different operations
+    const basePipeline = [...pipeline];
+    
+    // Get total count first
+    const countPipeline = [...basePipeline, { $count: "total" }];
+    const countResult = await messageModel.aggregate(countPipeline);
+    const total = countResult[0]?.total || 0;
+    
+    // Get all files for statistics (without pagination, but limited)
+    const statsPipeline = [...basePipeline];
+    const allFiles = await messageModel.aggregate(statsPipeline).limit(1000); // Limit for performance
+    
+    // Extract pagination info from pipeline
+    const { page, limit } = this.extractPaginationFromPipeline(basePipeline);
+    
+    // Get paginated files
+    const filesPipeline = [
+      ...basePipeline,
+      { $skip: (page - 1) * limit },
+      { $limit: limit }
+    ];
+    const files = await messageModel.aggregate(filesPipeline);
+    
+    this.logger.log(`Executed real aggregation: ${files.length} files, total: ${total}`);
+    return { files, allFiles, total };
+    */
+
+    throw new Error('Real Messages integration not yet implemented');
+  }
+
+  /**
+   * Execute mock file aggregation with realistic simulation
+   * @private
+   */
+  private async executeMockFileAggregation(pipeline: any[]): Promise<{
+    files: any[];
+    allFiles: any[];
+    total: number;
+  }> {
+    this.logger.warn('Using realistic mock data for file aggregation - implement Messages integration for production');
+
+    // Extract filters from pipeline for realistic simulation
+    const filters = this.extractFiltersFromPipeline(pipeline);
+    const { page, limit } = this.extractPaginationFromPipeline(pipeline);
+
+    // Generate comprehensive mock dataset
+    const allMockFiles = this.generateRealisticMockFiles(filters.conversationId);
+
+    // Apply filters
+    let filteredFiles = this.applyFiltersToMockData(allMockFiles, filters);
+
+    // Apply sorting
+    filteredFiles = this.applySortingToMockData(filteredFiles, filters.sortBy);
+
+    // Calculate total after filtering
+    const total = filteredFiles.length;
+
+    // Apply pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedFiles = filteredFiles.slice(startIndex, endIndex);
+
+    // Simulate network delay for realism
+    await this.simulateNetworkDelay();
+
+    this.logger.log(`Mock aggregation completed: ${paginatedFiles.length} files (page ${page}), total: ${total}`);
+
+    return {
+      files: paginatedFiles,
+      allFiles: filteredFiles, // For statistics calculation
+      total
+    };
+  }
+
+  /**
+   * Check if MessagesService is available
+   * @private
+   */
+  private hasMessagesService(): boolean {
+    // TODO: Implement when MessagesService is injected
+    // return !!this.messagesService;
+    return false;
+  }
+
+  /**
+   * Simulate realistic network delay
+   * @private
+   */
+  private async simulateNetworkDelay(): Promise<void> {
+    const delay = Math.random() * 100 + 50; // 50-150ms
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  /**
+   * Extract filters from aggregation pipeline
+   * @private
+   */
+  private extractFiltersFromPipeline(pipeline: any[]): any {
+    // Extract conversation ID from first match stage
+    const matchStage = pipeline.find(stage => stage.$match);
+    const conversationId = matchStage?.$match?.conversationId?.toString() || 'unknown';
+
+    // Extract other filters from subsequent match stages
+    let fileType = 'all';
+    let search = '';
+    let minSize: number | undefined;
+    let maxSize: number | undefined;
+    let sortBy = 'newest';
+
+    for (const stage of pipeline) {
+      if (stage.$match && stage.$match['attachments.fileType']) {
+        fileType = stage.$match['attachments.fileType'];
+      }
+      if (stage.$match && stage.$match['attachments.originalName']) {
+        search = stage.$match['attachments.originalName'].$regex;
+      }
+      if (stage.$match && stage.$match['attachments.fileSize']) {
+        if (stage.$match['attachments.fileSize'].$gte) {
+          minSize = stage.$match['attachments.fileSize'].$gte;
+        }
+        if (stage.$match['attachments.fileSize'].$lte) {
+          maxSize = stage.$match['attachments.fileSize'].$lte;
+        }
+      }
+    }
+
+    return { conversationId, fileType, search, minSize, maxSize, sortBy };
+  }
+
+  /**
+   * Generate realistic mock files dataset
+   * @private
+   */
+  private generateRealisticMockFiles(conversationId: string): any[] {
+    const now = new Date();
+    const oneDay = 24 * 60 * 60 * 1000;
+
+    const mockFiles = [
+      // Recent image files
+      {
+        id: '507f1f77bcf86cd799439001',
+        messageId: '507f1f77bcf86cd799439101',
+        originalName: 'vacation-sunset.jpg',
+        fileName: '2025-09-04_507f1f77bcf86cd799439001.jpg',
+        mimeType: 'image/jpeg',
+        fileSize: 2048576, // 2MB
+        fileType: 'image',
+        uploadedBy: {
+          id: '507f1f77bcf86cd799439201',
+          fullName: 'Nguyen Van A',
+          avatarUrl: 'https://example.com/avatar1.jpg'
+        },
+        uploadedAt: new Date(now.getTime() - oneDay),
+        messageTimestamp: new Date(now.getTime() - oneDay),
+        messageContent: 'Check out this amazing sunset! 🌅',
+        downloadCount: 5,
+        metadata: { width: 1920, height: 1080 }
+      },
+      {
+        id: '507f1f77bcf86cd799439002',
+        messageId: '507f1f77bcf86cd799439102',
+        originalName: 'team-photo.png',
+        fileName: '2025-09-03_507f1f77bcf86cd799439002.png',
+        mimeType: 'image/png',
+        fileSize: 3145728, // 3MB
+        fileType: 'image',
+        uploadedBy: {
+          id: '507f1f77bcf86cd799439202',
+          fullName: 'Tran Thi B',
+          avatarUrl: 'https://example.com/avatar2.jpg'
+        },
+        uploadedAt: new Date(now.getTime() - 2 * oneDay),
+        messageTimestamp: new Date(now.getTime() - 2 * oneDay),
+        messageContent: 'Our team meeting today',
+        downloadCount: 12,
+        metadata: { width: 1280, height: 720 }
+      },
+
+      // Document files
+      {
+        id: '507f1f77bcf86cd799439003',
+        messageId: '507f1f77bcf86cd799439103',
+        originalName: 'quarterly-report.pdf',
+        fileName: '2025-09-02_507f1f77bcf86cd799439003.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 5242880, // 5MB
+        fileType: 'document',
+        uploadedBy: {
+          id: '507f1f77bcf86cd799439201',
+          fullName: 'Nguyen Van A',
+          avatarUrl: 'https://example.com/avatar1.jpg'
+        },
+        uploadedAt: new Date(now.getTime() - 3 * oneDay),
+        messageTimestamp: new Date(now.getTime() - 3 * oneDay),
+        messageContent: 'Q3 financial report for review',
+        downloadCount: 8,
+        metadata: { pages: 25 }
+      },
+      {
+        id: '507f1f77bcf86cd799439004',
+        messageId: '507f1f77bcf86cd799439104',
+        originalName: 'project-presentation.pptx',
+        fileName: '2025-09-01_507f1f77bcf86cd799439004.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        fileSize: 8388608, // 8MB
+        fileType: 'document',
+        uploadedBy: {
+          id: '507f1f77bcf86cd799439203',
+          fullName: 'Le Van C',
+          avatarUrl: 'https://example.com/avatar3.jpg'
+        },
+        uploadedAt: new Date(now.getTime() - 4 * oneDay),
+        messageTimestamp: new Date(now.getTime() - 4 * oneDay),
+        messageContent: 'Final presentation slides',
+        downloadCount: 15,
+        metadata: { slides: 42 }
+      },
+
+      // Video files
+      {
+        id: '507f1f77bcf86cd799439005',
+        messageId: '507f1f77bcf86cd799439105',
+        originalName: 'demo-video.mp4',
+        fileName: '2025-08-31_507f1f77bcf86cd799439005.mp4',
+        mimeType: 'video/mp4',
+        fileSize: 15728640, // 15MB
+        fileType: 'video',
+        uploadedBy: {
+          id: '507f1f77bcf86cd799439202',
+          fullName: 'Tran Thi B',
+          avatarUrl: 'https://example.com/avatar2.jpg'
+        },
+        uploadedAt: new Date(now.getTime() - 5 * oneDay),
+        messageTimestamp: new Date(now.getTime() - 5 * oneDay),
+        messageContent: 'Product demo for client meeting',
+        downloadCount: 6,
+        metadata: { duration: 180, width: 1280, height: 720, fps: 30 }
+      },
+
+      // Audio files
+      {
+        id: '507f1f77bcf86cd799439006',
+        messageId: '507f1f77bcf86cd799439106',
+        originalName: 'meeting-recording.mp3',
+        fileName: '2025-08-30_507f1f77bcf86cd799439006.mp3',
+        mimeType: 'audio/mpeg',
+        fileSize: 4194304, // 4MB
+        fileType: 'audio',
+        uploadedBy: {
+          id: '507f1f77bcf86cd799439204',
+          fullName: 'Pham Van D',
+          avatarUrl: 'https://example.com/avatar4.jpg'
+        },
+        uploadedAt: new Date(now.getTime() - 6 * oneDay),
+        messageTimestamp: new Date(now.getTime() - 6 * oneDay),
+        messageContent: 'Yesterday\'s meeting recording',
+        downloadCount: 3,
+        metadata: { duration: 2400, bitrate: 128, sampleRate: 44100 }
+      },
+
+      // Other file types
+      {
+        id: '507f1f77bcf86cd799439007',
+        messageId: '507f1f77bcf86cd799439107',
+        originalName: 'data-export.zip',
+        fileName: '2025-08-29_507f1f77bcf86cd799439007.zip',
+        mimeType: 'application/zip',
+        fileSize: 10485760, // 10MB
+        fileType: 'other',
+        uploadedBy: {
+          id: '507f1f77bcf86cd799439203',
+          fullName: 'Le Van C',
+          avatarUrl: 'https://example.com/avatar3.jpg'
+        },
+        uploadedAt: new Date(now.getTime() - 7 * oneDay),
+        messageTimestamp: new Date(now.getTime() - 7 * oneDay),
+        messageContent: 'Database export files',
+        downloadCount: 2,
+        metadata: { compressedSize: 10485760, uncompressedSize: 52428800 }
+      }
+    ];
+
+    // Add file URLs dynamically
+    return mockFiles.map(file => ({
+      ...file,
+      fileUrl: this.generateFileUrl(file.fileName, file.id),
+      thumbnailUrl: file.fileType === 'image' || file.fileType === 'video'
+        ? this.generateThumbnailUrl(file.id, file.mimeType)
+        : undefined
+    }));
+  }
+
+  /**
+   * Apply filters to mock data
+   * @private
+   */
+  private applyFiltersToMockData(files: any[], filters: any): any[] {
+    let result = [...files];
+
+    // Filter by file type
+    if (filters.fileType && filters.fileType !== 'all') {
+      result = result.filter(file => file.fileType === filters.fileType);
+    }
+
+    // Filter by search term
+    if (filters.search) {
+      const searchTerm = filters.search.toLowerCase();
+      result = result.filter(file =>
+        file.originalName.toLowerCase().includes(searchTerm) ||
+        file.messageContent?.toLowerCase().includes(searchTerm)
+      );
+    }
+
+    // Filter by file size
+    if (filters.minSize) {
+      result = result.filter(file => file.fileSize >= filters.minSize);
+    }
+
+    if (filters.maxSize) {
+      result = result.filter(file => file.fileSize <= filters.maxSize);
+    }
+
+    return result;
+  }
+
+  /**
+   * Apply sorting to mock data
+   * @private
+   */
+  private applySortingToMockData(files: any[], sortBy: string): any[] {
+    const result = [...files];
+
+    switch (sortBy) {
+      case 'newest':
+        return result.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
+      case 'oldest':
+        return result.sort((a, b) => a.uploadedAt.getTime() - b.uploadedAt.getTime());
+      case 'size_desc':
+        return result.sort((a, b) => b.fileSize - a.fileSize);
+      case 'size_asc':
+        return result.sort((a, b) => a.fileSize - b.fileSize);
+      case 'name_asc':
+        return result.sort((a, b) => a.originalName.localeCompare(b.originalName));
+      case 'name_desc':
+        return result.sort((a, b) => b.originalName.localeCompare(a.originalName));
+      default:
+        return result.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
+    }
+  }
+
+  /**
+   * Process file results and add download URLs
+   * @private
+   */
+  private async processFileResults(files: any[]): Promise<ConversationFilesResult['files']> {
+    // TODO: Generate actual download URLs when FilesService is integrated
+    return files.map(file => ({
+      ...file,
+      fileType: file.fileType as ConversationFileType,
+      // Generate download URL
+      fileUrl: file.fileUrl || this.generateFileUrl(file.fileName, file.id),
+      // Generate thumbnail URL for images/videos
+      thumbnailUrl: file.thumbnailUrl || this.generateThumbnailUrl(file.id, file.mimeType)
+    }));
+  }
+
+  /**
+   * Calculate file type statistics
+   * @private
+   */
+  private calculateFileTypeStats(allFiles: any[]): Record<string, number> {
+    const stats = {
+      image: 0,
+      video: 0,
+      audio: 0,
+      document: 0,
+      other: 0
+    };
+
+    allFiles.forEach(file => {
+      if (stats.hasOwnProperty(file.fileType)) {
+        stats[file.fileType as keyof typeof stats]++;
+      } else {
+        stats.other++;
+      }
+    });
+
+    return stats;
+  }
+
+  /**
+   * Calculate total storage used by all files
+   * @private
+   */
+  private calculateTotalStorageUsed(allFiles: any[]): number {
+    return allFiles.reduce((total, file) => total + (file.fileSize || 0), 0);
+  }
+
+  /**
+   * Get sort field for MongoDB aggregation
+   * @private
+   */
+  private getSortField(sortBy: string): Record<string, 1 | -1> {
+    switch (sortBy) {
+      case 'newest':
+        return { 'attachments.uploadedAt': -1 };
+      case 'oldest':
+        return { 'attachments.uploadedAt': 1 };
+      case 'size_desc':
+        return { 'attachments.fileSize': -1 };
+      case 'size_asc':
+        return { 'attachments.fileSize': 1 };
+      case 'name_asc':
+        return { 'attachments.originalName': 1 };
+      case 'name_desc':
+        return { 'attachments.originalName': -1 };
+      default:
+        return { 'attachments.uploadedAt': -1 };
+    }
+  }
+
+  /**
+   * Extract pagination parameters from aggregation pipeline
+   * @private
+   */
+  private extractPaginationFromPipeline(pipeline: any[]): { page: number; limit: number } {
+    let page = 1;
+    let limit = 20;
+
+    // Find skip and limit stages in pipeline
+    for (const stage of pipeline) {
+      if (stage.$skip !== undefined && stage.$limit !== undefined) {
+        limit = stage.$limit;
+        page = Math.floor(stage.$skip / limit) + 1;
+        break;
+      }
+    }
+
+    return { page, limit };
+  }
+
+  /**
+   * Generate file download URL
+   * @private
+   */
+  private generateFileUrl(fileName: string, fileId: string): string {
+    const baseUrl = process.env.FILE_BASE_URL || 'http://localhost:3000';
+    return `${baseUrl}/api/files/${fileId}/download/${encodeURIComponent(fileName)}`;
+  }
+
+  /**
+   * Generate thumbnail URL for media files
+   * @private
+   */
+  private generateThumbnailUrl(fileId: string, mimeType: string): string | undefined {
+    // Only generate thumbnails for images and videos
+    if (!mimeType.startsWith('image/') && !mimeType.startsWith('video/')) {
+      return undefined;
+    }
+
+    const baseUrl = process.env.FILE_BASE_URL || 'http://localhost:3000';
+    return `${baseUrl}/api/files/${fileId}/thumbnail`;
+  }
+
+  /**
+   * Determine file type category from MIME type
+   * @private
+   */
+  private determineFileType(mimeType: string): ConversationFileType {
+    if (mimeType.startsWith('image/')) {
+      return ConversationFileType.IMAGE;
+    }
+    if (mimeType.startsWith('video/')) {
+      return ConversationFileType.VIDEO;
+    }
+    if (mimeType.startsWith('audio/')) {
+      return ConversationFileType.AUDIO;
+    }
+    if (
+      mimeType.includes('pdf') ||
+      mimeType.includes('document') ||
+      mimeType.startsWith('text/') ||
+      mimeType.startsWith('application/')
+    ) {
+      return ConversationFileType.DOCUMENT;
+    }
+    return ConversationFileType.OTHER;
+  }
+
+  /**
+   * Sort files based on sort criteria
+   * @private
+   */
+  private sortFiles(files: any[], sortBy: string): any[] {
+    switch (sortBy) {
+      case 'newest':
+        return files.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+      case 'oldest':
+        return files.sort((a, b) => new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime());
+      case 'size_desc':
+        return files.sort((a, b) => b.fileSize - a.fileSize);
+      case 'size_asc':
+        return files.sort((a, b) => a.fileSize - b.fileSize);
+      case 'name_asc':
+        return files.sort((a, b) => a.originalName.localeCompare(b.originalName));
+      case 'name_desc':
+        return files.sort((a, b) => b.originalName.localeCompare(a.originalName));
+      default:
+        return files.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+    }
+  }
+
+  /**
+   * Check if file type should have thumbnail
+   * @private
+   */
+  private shouldHaveThumbnail(mimeType: string): boolean {
+    return mimeType.startsWith('image/') || mimeType.startsWith('video/');
   }
 }

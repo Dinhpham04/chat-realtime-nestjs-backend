@@ -41,7 +41,9 @@ import {
   AddParticipantsResponseDto,
   UpdateParticipantRoleResponseDto,
   RemoveParticipantResponseDto,
-  LeaveConversationResponseDto
+  LeaveConversationResponseDto,
+  ConversationFilesQueryDto,
+  ConversationFilesResponseDto
 } from '../dto';
 import {
   GroupCreationResponseDto,
@@ -50,7 +52,8 @@ import {
 } from '../dto/response/group-conversation-response.dto';
 import {
   PrepareConversationApiDocs,
-  GetConversationApiDocs
+  GetConversationApiDocs,
+  ConversationFilesApiDocs
 } from '../documentation';
 import {
   CreateGroupConversationApiDocs,
@@ -583,6 +586,59 @@ export class ConversationsController {
       success: true,
       leftAt: result.leftAt,
       remainingParticipants: result.remainingParticipants
+    };
+  }
+
+  /**
+   * Get conversation files/media
+   * 
+   * 🎯 Purpose: Retrieve all files shared in a conversation
+   * 📱 Mobile-First: Optimized for mobile gallery/media views
+   * 🔒 Security: Only conversation members can access files
+   * 
+   * Features:
+   * - Paginated file list with filtering
+   * - File type filtering (images, videos, documents, etc.)
+   * - Search by filename
+   * - Sort by date, size, name
+   * - File statistics and storage usage
+   * - Download URLs and thumbnails
+   */
+  @Get('/:conversationId/files')
+  @ConversationFilesApiDocs()
+  async getConversationFiles(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+    @Query() query: ConversationFilesQueryDto
+  ): Promise<ConversationFilesResponseDto> {
+    this.logger.log(`Getting files for conversation ${conversationId}, user ${user.userId}`, query);
+
+    const result = await this.conversationsService.getConversationFiles(
+      conversationId,
+      user.userId,
+      {
+        page: query.page,
+        limit: query.limit,
+        fileType: query.fileType,
+        sortBy: query.sortBy,
+        search: query.search,
+        minSize: query.minSize,
+        maxSize: query.maxSize
+      }
+    );
+
+    this.logger.log(`Retrieved ${result.files.length} files for conversation ${conversationId}`);
+
+    return {
+      files: result.files,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      hasNextPage: result.hasNextPage,
+      hasPreviousPage: result.hasPreviousPage,
+      fileTypeStats: result.fileTypeStats,
+      totalStorageUsed: result.totalStorageUsed
     };
   }
 }

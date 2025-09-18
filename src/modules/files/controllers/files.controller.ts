@@ -1259,6 +1259,16 @@ export class FilesController {
             minLength: 20
         }
     })
+    @ApiQuery({
+        name: 'thumbnail',
+        required: false,
+        description: 'Request thumbnail version of the file (for images/videos only)',
+        example: 'true',
+        schema: {
+            type: 'string',
+            enum: ['true']
+        }
+    })
     @ApiResponse({
         status: HttpStatus.OK,
         description: 'Full file preview loaded successfully (status 200)',
@@ -1380,6 +1390,7 @@ export class FilesController {
         @Query('token') token: string,
         @Request() req: any,
         @Response() res: ExpressResponse,
+        @Query('thumbnail') thumbnail?: string,
     ): Promise<void> {
         if (!token) {
             throw new BadRequestException('Preview token is required');
@@ -1400,6 +1411,33 @@ export class FilesController {
 
             // Get file metadata
             const file = await this.filesService.getFile(fileId, tokenData.userId);
+
+            // Handle thumbnail request
+            if (thumbnail === 'true') {
+                // Check if file has thumbnail and return it
+                if (file.thumbnailPath) {
+                    try {
+                        const thumbnailBuffer = await this.storageService.downloadFile(file.thumbnailPath);
+                        res.setHeader('Content-Type', 'image/jpeg');
+                        res.setHeader('Content-Disposition', 'inline');
+                        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+                        res.send(thumbnailBuffer);
+
+                        this.logger.log(`Thumbnail served for file ${fileId} by user ${tokenData.userId}`);
+                        return;
+                    } catch (error) {
+                        this.logger.warn(`Failed to serve thumbnail for file ${fileId}: ${error.message}`);
+                        // Fall through to serve original file
+                    }
+                } else {
+                    // No thumbnail available, return 404 or generate on-the-fly
+                    res.status(404).json({
+                        error: 'Thumbnail not available',
+                        message: 'No thumbnail exists for this file'
+                    });
+                    return;
+                }
+            }
 
             // Get file content
             let fileBuffer = await this.storageService.downloadFile(fileId);

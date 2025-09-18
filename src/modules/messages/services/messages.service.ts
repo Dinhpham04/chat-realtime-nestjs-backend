@@ -12,7 +12,7 @@
  * - DRY: Reuse DTOs and types for consistent operations
  */
 
-import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Types } from 'mongoose';
 import {
@@ -45,6 +45,7 @@ export class MessagesService implements IExtendedMessageService {
         @Inject('IMessageRepository')
         private readonly messageRepository: IMessageRepository,
         private readonly eventEmitter: EventEmitter2,
+        @Inject(forwardRef(() => ConversationsService))
         private readonly conversationsService: ConversationsService,
         private readonly usersService: UsersService,
         private readonly filesService: FilesService
@@ -70,6 +71,9 @@ export class MessagesService implements IExtendedMessageService {
             messageType: (dto.type as any) || MessageType.TEXT,
             content: dto.content,
             mentions: dto.mentions || [],
+            status: MessageStatus.SENT, // Set initial status as SENT
+            deliveredAt: undefined,
+            readAt: undefined,
             isDeleted: false,
             isEdited: false,
             isSystemMessage: false
@@ -79,18 +83,7 @@ export class MessagesService implements IExtendedMessageService {
         const savedMessage = await this.messageRepository.create(messageData);
 
         // Transform to response DTO
-        const message: MessageResponseDto = {
-            id: savedMessage._id.toString(),
-            conversationId: savedMessage.conversationId.toString(),
-            senderId: savedMessage.senderId.toString(),
-            type: savedMessage.messageType,
-            content: savedMessage.content,
-            attachments: [], // Will be handled by attachment module
-            mentions: dto.mentions || [],
-            createdAt: savedMessage.createdAt,
-            updatedAt: savedMessage.updatedAt,
-            status: MessageStatus.SENT
-        };
+        const message = this.transformMessageToDto(savedMessage);
 
         // Emit real-time events for Socket.IO Gateway
         this.eventEmitter.emit('message.sent', {
@@ -138,7 +131,9 @@ export class MessagesService implements IExtendedMessageService {
             mentions: [],
             createdAt: existingMessage.createdAt,
             updatedAt: existingMessage.updatedAt,
-            status: MessageStatus.DELIVERED
+            status: (existingMessage as any).status || MessageStatus.SENT,
+            deliveredAt: (existingMessage as any).deliveredAt || null,
+            readAt: (existingMessage as any).readAt || null
         };
 
         // Validate user can edit this message
@@ -168,7 +163,9 @@ export class MessagesService implements IExtendedMessageService {
             mentions: [],
             createdAt: updatedMessage.createdAt,
             updatedAt: updatedMessage.updatedAt,
-            status: MessageStatus.DELIVERED
+            status: (updatedMessage as any).status || MessageStatus.SENT,
+            deliveredAt: (updatedMessage as any).deliveredAt || null,
+            readAt: (updatedMessage as any).readAt || null
         };
 
         // Emit real-time event
@@ -209,7 +206,9 @@ export class MessagesService implements IExtendedMessageService {
             mentions: [],
             createdAt: existingMessage.createdAt,
             updatedAt: existingMessage.updatedAt,
-            status: MessageStatus.DELIVERED
+            status: (existingMessage as any).status || MessageStatus.SENT,
+            deliveredAt: (existingMessage as any).deliveredAt || null,
+            readAt: (existingMessage as any).readAt || null
         };
 
         // Validate user can delete this message
@@ -278,19 +277,10 @@ export class MessagesService implements IExtendedMessageService {
                     attachments = [];
                 }
 
-                return {
-                    id: message._id.toString(),
-                    conversationId: message.conversationId.toString(),
-                    senderId: message.senderId.toString(),
-                    sender: senders[i],
-                    type: message.messageType,
-                    content: message.content,
-                    attachments,
-                    mentions: [],
-                    createdAt: message.createdAt,
-                    updatedAt: message.updatedAt,
-                    status: MessageStatus.DELIVERED // Default status since not stored in schema yet
-                };
+                const messageDto = this.transformMessageToDto(message, attachments);
+                // Add sender info
+                messageDto.sender = senders[i];
+                return messageDto;
             })
         );
 
@@ -361,7 +351,9 @@ export class MessagesService implements IExtendedMessageService {
             mentions: [],
             createdAt: message.createdAt,
             updatedAt: message.updatedAt,
-            status: MessageStatus.DELIVERED // Default status
+            status: (message as any).status || MessageStatus.SENT,
+            deliveredAt: (message as any).deliveredAt || null,
+            readAt: (message as any).readAt || null
         }));
 
         return {
@@ -508,6 +500,33 @@ export class MessagesService implements IExtendedMessageService {
 
     // Private helper methods
 
+    /**
+     * Transform message document to response DTO
+     */
+    private transformMessageToDto(message: any, attachments: any[] = []): MessageResponseDto {
+        return {
+            id: message._id.toString(),
+            conversationId: message.conversationId.toString(),
+            senderId: message.senderId.toString(),
+            content: message.content || '',
+            type: message.messageType,
+            status: message.status || MessageStatus.SENT,
+            deliveredAt: message.deliveredAt || undefined,
+            readAt: message.readAt || undefined,
+            attachments,
+            mentions: [],
+            replyTo: message.replyTo ? {
+                messageId: message.replyTo.toString(),
+                content: '',
+                senderId: '',
+                senderName: ''
+            } : undefined,
+            createdAt: message.createdAt,
+            updatedAt: message.updatedAt,
+            delivery: undefined
+        };
+    }
+
     private async validateUserCanSendMessage(conversationId: string, userContext: UserContext): Promise<void> {
         // Check if user is member of conversation using ConversationsService
         const isMember = await this.conversationsService.isUserMemberOfConversation(
@@ -578,21 +597,24 @@ export class MessagesService implements IExtendedMessageService {
      */
     async markAsDelivered(messageId: string, userId: string, deliveredAt: number): Promise<void> {
         try {
-            // Update message in database with updatedAt timestamp
-            await this.messageRepository.updateMessageStatus(messageId, {
-                status: MessageStatus.DELIVERED, // This will be stored in a separate status collection
-                updatedAt: new Date(deliveredAt)
-            });
+            this.logger.debug(`Marking message ${messageId} as delivered by user ${userId}`);
 
-            // Emit delivery event
-            this.eventEmitter.emit('message.delivered', {
-                messageId,
-                userId,
-                deliveredAt,
-                timestamp: Date.now()
-            });
+            // Mark as delivered in repository
+            const success = await this.messageRepository.markAsDelivered(messageId, userId);
 
-            this.logger.log(`Message ${messageId} marked as delivered by user ${userId}`);
+            if (success) {
+                // Emit delivery event
+                this.eventEmitter.emit('message.delivered', {
+                    messageId,
+                    userId,
+                    deliveredAt,
+                    timestamp: Date.now()
+                });
+
+                this.logger.log(`Message ${messageId} marked as delivered by user ${userId}`);
+            } else {
+                this.logger.warn(`Failed to mark message ${messageId} as delivered - message not found or already processed`);
+            }
 
         } catch (error) {
             this.logger.error(`Failed to mark message ${messageId} as delivered:`, error);
@@ -617,7 +639,9 @@ export class MessagesService implements IExtendedMessageService {
                 senderId: message.senderId.toString(),
                 content: message.content || '',
                 type: message.messageType,
-                status: MessageStatus.SENT, // Default status since we don't have it in schema
+                status: (message as any).status || MessageStatus.SENT,
+                deliveredAt: (message as any).deliveredAt || null,
+                readAt: (message as any).readAt || null,
                 attachments: [], // Default empty array since not in basic schema
                 mentions: [], // Default empty array since not in basic schema
                 replyTo: message.replyTo ? {
@@ -744,7 +768,9 @@ export class MessagesService implements IExtendedMessageService {
                         senderId: message.senderId.toString(),
                         content: message.content || '',
                         type: message.messageType,
-                        status: MessageStatus.SENT, // Default status
+                        status: (message as any).status || MessageStatus.SENT,
+                        deliveredAt: (message as any).deliveredAt || null,
+                        readAt: (message as any).readAt || null,
                         attachments,
                         mentions: [], // TODO: Implement mentions
                         replyTo: message.replyTo ? {
@@ -825,25 +851,7 @@ export class MessagesService implements IExtendedMessageService {
                     attachments = [];
                 }
 
-                return {
-                    id: message._id.toString(),
-                    conversationId: message.conversationId.toString(),
-                    senderId: message.senderId.toString(),
-                    content: message.content || '',
-                    type: message.messageType,
-                    status: MessageStatus.SENT,
-                    attachments,
-                    mentions: [],
-                    replyTo: message.replyTo ? {
-                        messageId: message.replyTo.toString(),
-                        content: '',
-                        senderId: '',
-                        senderName: ''
-                    } : undefined,
-                    createdAt: message.createdAt,
-                    updatedAt: message.updatedAt,
-                    delivery: undefined
-                };
+                return this.transformMessageToDto(message, attachments);
             };
 
             const beforeMessages = await Promise.all(messagesBefore.map(transformMessage));

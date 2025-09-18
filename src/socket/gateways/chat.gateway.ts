@@ -52,7 +52,7 @@ const CALL_TIMEOUT = 30000; // 30 seconds for incoming call timeout
 const DELIVERY_BATCH_SIZE = 50;
 
 // Typing indicator constants
-const TYPING_TIMEOUT = 3000; // 3 seconds - auto clear typing if no activity
+const TYPING_TIMEOUT = 5000; // 3 seconds - auto clear typing if no activity
 const TYPING_DEBOUNCE = 1000; // 1 second - debounce typing events
 
 // Error constants
@@ -683,56 +683,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 status: 'failed',
                 processingTime: Date.now() - startTime,
             });
-        }
-    }
-
-    @SubscribeMessage('message_delivered')
-    async handleMessageDelivered(
-        @ConnectedSocket() client: Socket,
-        @MessageBody() data: DeliveryDto,
-    ) {
-        try {
-            const userId = this.socketToUser.get(client.id);
-            if (!userId) {
-                this.logger.warn('Message delivery update: User not authenticated');
-                return;
-            }
-
-            this.logger.log(`Message ${data.messageId} marked as delivered by user ${userId}`);
-
-            // Update delivery status in database (if service supports it)
-            try {
-                await this.messagesService.markAsDelivered(data.messageId, userId, data.deliveredAt);
-                this.logger.debug(`Delivery status update skipped - service method not implemented`);
-            } catch (dbError) {
-                this.logger.warn(`Failed to update delivery status in database:`, dbError);
-            }
-
-            // Notify conversation participants about delivery (excluding the user who delivered)
-            const deliveryUpdate = {
-                messageId: data.messageId,
-                userId: userId,
-                status: 'delivered',
-                timestamp: data.deliveredAt
-            };
-
-            // Broadcast delivery update to conversation participants
-            client.to(`conversation:${data.conversationId}`).emit('message_delivery_update', deliveryUpdate);
-
-            // Add to delivery batch for optimization (if service supports it)
-            try {
-                await this.optimizationService?.addDeliveryUpdate?.(data.conversationId, {
-                    messageId: data.messageId,
-                    userId: userId,
-                    status: 'delivered',
-                    timestamp: data.deliveredAt,
-                });
-            } catch (optimizationError) {
-                this.logger.warn(`Optimization service delivery update failed:`, optimizationError);
-            }
-
-        } catch (error) {
-            this.logger.error(`Delivery update error for message ${data.messageId}:`, error);
         }
     }
 
@@ -1503,6 +1453,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 readAt: data.readAt,
                 conversationId: data.conversationId
             };
+            this.logger.debug('Emitting batch_read_receipts with data:', readReceiptUpdate);
 
             client.to(`conversation:${data.conversationId}`).emit('batch_read_receipts', readReceiptUpdate);
 
@@ -1646,7 +1597,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     /**
      * Handle delivery confirmation from client
-     * This confirms that a specific message was successfully received by a participant
+     * This is the ONLY way messages get marked as delivered (no auto-marking)
+     * Client sends this when message is actually received and processed
      */
     @SubscribeMessage('confirm_message_delivery')
     async handleConfirmMessageDelivery(
@@ -1662,26 +1614,52 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             this.logger.log(`Message ${data.messageId} delivery confirmed by user ${userId}`);
 
-            // Update delivery status in database
+            // Update delivery status in database (idempotent operation)
             try {
                 await this.messagesService.markAsDelivered?.(data.messageId, userId, data.deliveredAt);
+                this.logger.debug(`Message ${data.messageId} marked as delivered for user ${userId}`);
             } catch (dbError) {
                 this.logger.warn(`Failed to update delivery confirmation in database:`, dbError);
             }
 
-            // Notify sender about successful delivery
+            // Notify sender and conversation about successful delivery
             const deliveryConfirmation = {
                 messageId: data.messageId,
                 userId: userId,
                 status: 'delivered_confirmed',
-                timestamp: data.deliveredAt
+                timestamp: data.deliveredAt,
+                conversationId: data.conversationId
             };
 
-            // Send confirmation to conversation (mainly for sender to update UI)
+            // Send confirmation to conversation (for sender to update UI with delivery status)
             client.to(`conversation:${data.conversationId}`).emit('message_delivery_confirmed', deliveryConfirmation);
 
-            // Remove from queue if it was queued
-            await this.messageQueueService.removeQueuedMessage?.(userId, data.messageId);
+            // Also send to sender specifically (if they're not in conversation room)
+            this.sendToUser(userId, 'delivery_confirmation_received', {
+                messageId: data.messageId,
+                conversationId: data.conversationId,
+                confirmedAt: data.deliveredAt
+            });
+
+            // Remove from queue if it was queued for offline delivery
+            try {
+                await this.messageQueueService.removeQueuedMessage?.(userId, data.messageId);
+                this.logger.debug(`Removed message ${data.messageId} from queue for user ${userId}`);
+            } catch (queueError) {
+                this.logger.warn(`Failed to remove message from queue:`, queueError);
+            }
+
+            // Add to optimization service for batch processing
+            try {
+                await this.optimizationService?.addDeliveryUpdate?.(data.conversationId, {
+                    messageId: data.messageId,
+                    userId: userId,
+                    status: 'delivered',
+                    timestamp: data.deliveredAt,
+                });
+            } catch (optimizationError) {
+                this.logger.warn(`Optimization service delivery update failed:`, optimizationError);
+            }
 
         } catch (error) {
             this.logger.error(`Delivery confirmation error for message ${data.messageId}:`, error);
@@ -2131,10 +2109,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
      */
     async updateDeliveryStatusForOnlineUsers(messageId: string, participants: string[]): Promise<void> {
         try {
-            const deliveryUpdates: Array<{
+            const notificationsSent: Array<{
                 messageId: string;
                 userId: string;
-                status: 'delivered';
+                status: 'pending_delivery';
                 timestamp: number;
             }> = [];
 
@@ -2144,43 +2122,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
                 this.logger.debug(`Checking online status for user ${userId} for message ${this.isUserOnline(userId) ? 'online' : 'offline'}`);
                 if (this.isUserOnline(userId)) {
-                    // Mark as delivered for online users
+                    // Only notify online users, don't auto-mark as delivered
                     try {
-                        await this.messagesService.markAsDelivered(messageId, userId, currentTimestamp);
-                        this.logger.debug(`Delivery status update in DB skipped for user ${userId}`);
-
-                        deliveryUpdates.push({
+                        notificationsSent.push({
                             messageId,
                             userId,
-                            status: 'delivered' as const,
+                            status: 'pending_delivery' as const,
                             timestamp: currentTimestamp
                         });
 
-                        // Emit delivery confirmation to sender and other participants
-                        this.sendToUser(userId, 'message_delivery_update', {
+                        // Emit pending delivery notification (client will confirm when ready)
+                        this.sendToUser(userId, 'message_pending_delivery', {
                             messageId,
                             userId,
-                            status: 'delivered',
-                            timestamp: currentTimestamp
+                            status: 'pending_delivery',
+                            timestamp: currentTimestamp,
+                            requiresConfirmation: true
                         });
 
-                    } catch (dbError) {
-                        this.logger.warn(`Failed to update delivery status in DB for user ${userId}, message ${messageId}:`, dbError);
+                        this.logger.debug(`Sent pending delivery notification to user ${userId} for message ${messageId}`);
+
+                    } catch (notificationError) {
+                        this.logger.warn(`Failed to send delivery notification to user ${userId}, message ${messageId}:`, notificationError);
                     }
                 }
             }
 
-            // Batch update through optimization service if available
-            if (deliveryUpdates.length > 0) {
-                try {
-                    for (const update of deliveryUpdates) {
-                        await this.optimizationService?.addDeliveryUpdate?.(messageId, update);
-                    }
-                } catch (optimizationError) {
-                    this.logger.warn(`Optimization service delivery update failed:`, optimizationError);
-                }
-
-                this.logger.debug(`Updated delivery status for ${deliveryUpdates.length} online users for message ${messageId}`);
+            // Log pending delivery notifications
+            if (notificationsSent.length > 0) {
+                this.logger.debug(`Sent pending delivery notifications to ${notificationsSent.length} online users for message ${messageId}`);
             }
         } catch (error) {
             this.logger.error(`Failed to update delivery status for message ${messageId}:`, error);
@@ -2822,7 +2792,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 });
             }
 
-            this.logger.debug(`Fetched lastMessages user ${userId}`, lastMessages);
+            this.logger.debug(`Fetched lastMessages user ${userId}`, lastMessages, "update", updates);
 
             // Send response to client
             client.emit('conversations_last_messages_response', {

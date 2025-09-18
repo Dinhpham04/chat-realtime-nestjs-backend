@@ -284,27 +284,31 @@ export class FriendsService implements IFriendsService {
 
             const { onlineStatus, page = 1, limit = 20 } = options;
 
-            // Try cache first for performance (especially for friends list without filters)
-            const cacheKey = `friends:${userId}:${JSON.stringify(options)}`;
-            let cachedResult: FriendListResult | null = null;
+            // TODO: Cache logic commented out due to data inconsistency issues
+            // When adding/removing friends, cache is not properly invalidated
+            // causing stale data to be served. Will re-enable after implementing
+            // proper cache invalidation in all friend operations.
 
-            // Only use cache for unfiltered requests to avoid complexity
-            if (!options.search && onlineStatus === undefined) {
-                try {
-                    const cached = await this.cacheService.get(cacheKey);
-                    if (cached) {
-                        cachedResult = JSON.parse(cached);
-                        if (cachedResult) {
-                            // Update online status from Redis for cached data
-                            await this.updateOnlineStatusFromRedis(cachedResult.friends);
-                            this.logger.log(`Friends list served from cache for user ${userId}`);
-                            return cachedResult;
-                        }
-                    }
-                } catch (cacheError) {
-                    this.logger.warn(`Cache read failed: ${cacheError.message}`);
-                }
-            }
+            // const cacheKey = `friends:${userId}:${JSON.stringify(options)}`;
+            // let cachedResult: FriendListResult | null = null;
+
+            // // Only use cache for unfiltered requests to avoid complexity
+            // if (!options.search && onlineStatus === undefined) {
+            //     try {
+            //         const cached = await this.cacheService.get(cacheKey);
+            //         if (cached) {
+            //             cachedResult = JSON.parse(cached);
+            //             if (cachedResult) {
+            //                 // Update online status from Redis for cached data
+            //                 await this.updateOnlineStatusFromRedis(cachedResult.friends);
+            //                 this.logger.log(`Friends list served from cache for user ${userId}`);
+            //                 return cachedResult;
+            //             }
+            //         }
+            //     } catch (cacheError) {
+            //         this.logger.warn(`Cache read failed: ${cacheError.message}`);
+            //     }
+            // }
 
             // Get friends from repository (without online filtering at DB level)
             const friends = await this.userFriendRepository.findFriendsByUserId(userId, {
@@ -362,14 +366,19 @@ export class FriendsService implements IFriendsService {
                 totalPages,
             };
 
-            // Cache result for performance (only unfiltered requests)
-            if (!options.search && onlineStatus === undefined) {
-                try {
-                    await this.cacheService.set(cacheKey, JSON.stringify(result), 300); // 5 minutes cache
-                } catch (cacheError) {
-                    this.logger.warn(`Cache write failed: ${cacheError.message}`);
-                }
-            }
+            // TODO: Cache write logic commented out due to data inconsistency issues
+            // Cache invalidation is not properly implemented in add/remove friend operations
+            // This causes stale data to be served. Will re-enable after implementing
+            // proper cache invalidation strategy.
+
+            // // Cache result for performance (only unfiltered requests)
+            // if (!options.search && onlineStatus === undefined) {
+            //     try {
+            //         await this.cacheService.set(cacheKey, JSON.stringify(result), 300); // 5 minutes cache
+            //     } catch (cacheError) {
+            //         this.logger.warn(`Cache write failed: ${cacheError.message}`);
+            //     }
+            // }
 
             this.logger.log(`Friends list retrieved for user ${userId}: ${friendsWithStatus.length} friends, ${onlineCount} online`);
             return result;

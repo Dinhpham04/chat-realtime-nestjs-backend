@@ -77,6 +77,11 @@ export interface IMessageRepository {
   markAsRead(messageId: string, userId: string): Promise<boolean>;
 
   /**
+   * Mark message as delivered
+   */
+  markAsDelivered(messageId: string, userId: string): Promise<boolean>;
+
+  /**
    * Update message status
    */
   updateStatus(messageId: string, status: string, timestamp?: Date): Promise<boolean>;
@@ -102,6 +107,11 @@ export interface IMessageRepository {
    * Bulk mark messages as read
    */
   bulkMarkAsRead(messageIds: string[], userId: string): Promise<number>;
+
+  /**
+   * Bulk mark messages as delivered
+   */
+  bulkMarkAsDelivered(messageIds: string[], userId: string): Promise<number>;
 
   /**
    * Bulk delete messages
@@ -139,6 +149,11 @@ export interface IMessageRepository {
    * Find unread messages for user
    */
   findUnreadByUser(userId: string): Promise<MessageDocument[]>;
+
+  /**
+   * Count unread messages in specific conversation for user
+   */
+  countUnreadInConversation(conversationId: string, userId: string): Promise<number>;
 
   /**
    * Find messages by sender

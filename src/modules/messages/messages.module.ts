@@ -47,6 +47,6 @@ import { FilesModule } from '../files/files.module';
             useClass: MessageRepository
         }
     ],
-    exports: [MessagesService, MessageRepository] // Export for Socket.IO Gateway use
+    exports: [MessagesService, MessageRepository, 'IMessageRepository'] // Export for Socket.IO Gateway use
 })
 export class MessagesModule { }

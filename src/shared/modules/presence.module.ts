@@ -15,6 +15,7 @@ import { PresenceCleanupService } from '../services/presence-cleanup.service';
 import { LastMessageService } from '../services/last-message.service';
 import { RedisModule } from '../../redis/redis.module';
 import { ConversationsModule } from '../../modules/conversations/conversations.module';
+import { MessagesModule } from '../../modules/messages/messages.module';
 
 @Module({
     imports: [
@@ -22,6 +23,7 @@ import { ConversationsModule } from '../../modules/conversations/conversations.m
         EventEmitterModule.forRoot(), // For presence event broadcasting
         ScheduleModule.forRoot(), // For cleanup jobs
         forwardRef(() => ConversationsModule), // For getting user contacts
+        forwardRef(() => MessagesModule), // For unread count calculation
     ],
     providers: [
         PresenceService,

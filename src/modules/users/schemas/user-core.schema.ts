@@ -88,7 +88,7 @@ export class UserCore {
 
   @Prop({
     default: null,
-    match: /^https?:\/\/.+\.(jpg|jpeg|png|gif|webp)$/i
+    // match: /^https?:\/\/.+\.(jpg|jpeg|png|gif|webp)$/i
   })
   avatarUrl?: string;
 

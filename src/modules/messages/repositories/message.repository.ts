@@ -289,6 +289,116 @@ export class MessageRepository implements IMessageRepository {
   }
 
   /**
+   * Mark message as delivered
+   */
+  async markAsDelivered(messageId: string, userId: string): Promise<boolean> {
+    try {
+      if (!Types.ObjectId.isValid(messageId)) {
+        return false;
+      }
+
+      const result = await this.messageModel
+        .updateOne(
+          {
+            _id: new Types.ObjectId(messageId),
+            senderId: { $ne: userId }, // Don't mark own messages as delivered
+            isDeleted: false,
+            status: { $ne: MessageStatus.READ } // Don't downgrade from read to delivered
+          },
+          {
+            status: MessageStatus.DELIVERED,
+            deliveredAt: new Date(),
+            updatedAt: new Date()
+          }
+        )
+        .exec();
+
+      const success = result.modifiedCount > 0;
+      if (success) {
+        this.logger.debug(`Marked message ${messageId} as delivered to user ${userId}`);
+      }
+
+      return success;
+    } catch (error) {
+      this.logger.error(`Failed to mark message ${messageId} as delivered:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Bulk mark messages as read
+   */
+  async bulkMarkAsRead(messageIds: string[], userId: string): Promise<number> {
+    try {
+      const validIds = messageIds
+        .filter(id => Types.ObjectId.isValid(id))
+        .map(id => new Types.ObjectId(id));
+
+      if (validIds.length === 0) {
+        return 0;
+      }
+
+      const result = await this.messageModel
+        .updateMany(
+          {
+            _id: { $in: validIds },
+            senderId: { $ne: userId }, // Don't mark own messages as read
+            isDeleted: false
+          },
+          {
+            status: MessageStatus.READ,
+            readAt: new Date(),
+            updatedAt: new Date()
+          }
+        )
+        .exec();
+
+      this.logger.debug(`Bulk marked ${result.modifiedCount} messages as read by user ${userId}`);
+      return result.modifiedCount;
+    } catch (error) {
+      this.logger.error(`Failed to bulk mark messages as read:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Bulk mark messages as delivered
+   */
+  async bulkMarkAsDelivered(messageIds: string[], userId: string): Promise<number> {
+    try {
+      const validIds = messageIds
+        .filter(id => Types.ObjectId.isValid(id))
+        .map(id => new Types.ObjectId(id));
+
+      if (validIds.length === 0) {
+        return 0;
+      }
+
+      const result = await this.messageModel
+        .updateMany(
+          {
+            _id: { $in: validIds },
+            senderId: { $ne: userId }, // Don't mark own messages as delivered
+            isDeleted: false,
+            status: { $ne: MessageStatus.READ } // Don't downgrade from read to delivered
+          },
+          {
+            status: MessageStatus.DELIVERED,
+            deliveredAt: new Date(),
+            updatedAt: new Date()
+          }
+        )
+        .exec();
+
+      this.logger.debug(`Bulk marked ${result.modifiedCount} messages as delivered to user ${userId}`);
+      return result.modifiedCount;
+    } catch (error) {
+      this.logger.error(`Failed to bulk mark messages as delivered:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Update message status
    */
   async updateStatus(messageId: string, status: string, timestamp?: Date): Promise<boolean> {
@@ -405,41 +515,6 @@ export class MessageRepository implements IMessageRepository {
     }
   }
 
-  /**
-   * Bulk mark messages as read
-   */
-  async bulkMarkAsRead(messageIds: string[], userId: string): Promise<number> {
-    try {
-      const validIds = messageIds
-        .filter(id => Types.ObjectId.isValid(id))
-        .map(id => new Types.ObjectId(id));
-
-      if (validIds.length === 0) {
-        return 0;
-      }
-
-      const result = await this.messageModel
-        .updateMany(
-          {
-            _id: { $in: validIds },
-            senderId: { $ne: userId }, // Don't mark own messages as read
-            isDeleted: false
-          },
-          {
-            status: MessageStatus.READ,
-            readAt: new Date(),
-            updatedAt: new Date()
-          }
-        )
-        .exec();
-
-      this.logger.debug(`Bulk marked ${result.modifiedCount} messages as read`);
-      return result.modifiedCount;
-    } catch (error) {
-      this.logger.error(`Failed to bulk mark messages as read:`, error);
-      throw error;
-    }
-  }
 
   /**
    * Bulk delete messages
@@ -493,6 +568,34 @@ export class MessageRepository implements IMessageRepository {
       return unreadMessages;
     } catch (error) {
       this.logger.error(`Failed to find unread messages for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Count unread messages in specific conversation for user
+   */
+  async countUnreadInConversation(conversationId: string, userId: string): Promise<number> {
+    try {
+      if (!Types.ObjectId.isValid(conversationId)) {
+        this.logger.warn(`Invalid conversationId: ${conversationId}`);
+        return 0;
+      }
+
+      const count = await this.messageModel
+        .countDocuments({
+          conversationId: new Types.ObjectId(conversationId),
+          senderId: { $ne: new Types.ObjectId(userId) }, // Not sent by the user
+          status: { $ne: MessageStatus.READ }, // Not read yet
+          isDeleted: false
+        })
+        .exec();
+
+      this.logger.debug(`Unread count for conversation ${conversationId}, user ${userId}: ${count}`);
+      return count;
+
+    } catch (error) {
+      this.logger.error(`Failed to count unread messages for conversation ${conversationId}, user ${userId}:`, error);
       throw error;
     }
   }

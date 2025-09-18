@@ -88,9 +88,9 @@ export class ContactSyncService implements IContactSyncService {
             // Mobile-First: Check rate limiting (5 requests per hour per user)
             const rateLimitKey = `contact_import:${userId}`;
             const currentRequests = Number(await this.cacheService.get(rateLimitKey) || 0);
-            if (currentRequests >= BULK_IMPORT.MAX_COUNT_PER_HOUR) {
-                throw new BadRequestException(`Rate limit exceeded. Maximum ${BULK_IMPORT.MAX_COUNT_PER_HOUR} imports per hour.`);
-            }
+            // if (currentRequests >= BULK_IMPORT.MAX_COUNT_PER_HOUR) {
+            //     throw new BadRequestException(`Rate limit exceeded. Maximum ${BULK_IMPORT.MAX_COUNT_PER_HOUR} imports per hour.`);
+            // }
 
             // Mobile-First: Optimize for low data mode
             const batchSize = deviceContext?.lowDataMode ? 25 : 50;

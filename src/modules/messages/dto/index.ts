@@ -206,6 +206,12 @@ export class MessageResponseDto {
     @ApiPropertyOptional({ description: 'Message status for current user' })
     status?: MessageStatus;
 
+    @ApiPropertyOptional({ description: 'When message was delivered' })
+    deliveredAt?: Date;
+
+    @ApiPropertyOptional({ description: 'When message was read' })
+    readAt?: Date;
+
     @ApiPropertyOptional({ description: 'Delivery info' })
     delivery?: {
         delivered: number;

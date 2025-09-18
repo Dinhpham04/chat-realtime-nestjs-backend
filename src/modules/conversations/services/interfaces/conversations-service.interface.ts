@@ -8,6 +8,7 @@
 
 import { Types } from 'mongoose';
 import { ConversationType, ConversationWithParticipants, ParticipantRole } from '../../types/conversation.types';
+import { ConversationFileType } from '../../dto/conversation-files.dto';
 
 export interface CreateDirectConversationResult {
   conversationId: string;
@@ -129,6 +130,23 @@ export interface IConversationsService {
     conversationId: string,
     userId: string
   ): Promise<LeaveConversationResult>;
+
+  /**
+   * Get all files/media from a conversation
+   */
+  getConversationFiles(
+    conversationId: string,
+    userId: string,
+    options?: {
+      page?: number;
+      limit?: number;
+      fileType?: string;
+      sortBy?: string;
+      search?: string;
+      minSize?: number;
+      maxSize?: number;
+    }
+  ): Promise<ConversationFilesResult>;
 }
 
 // =============== GROUP CONVERSATION INTERFACES ===============
@@ -312,4 +330,36 @@ export interface LeaveConversationResult {
   success: boolean;
   leftAt: string;
   remainingParticipants: number;
+}
+
+export interface ConversationFilesResult {
+  files: Array<{
+    id: string;
+    messageId: string;
+    originalName: string;
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+    fileType: ConversationFileType;
+    fileUrl: string;
+    thumbnailUrl?: string;
+    uploadedBy: {
+      id: string;
+      fullName: string;
+      avatarUrl?: string;
+    };
+    uploadedAt: Date;
+    messageTimestamp: Date;
+    messageContent?: string;
+    downloadCount?: number;
+    metadata?: any;
+  }>;
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+  fileTypeStats: Record<string, number>;
+  totalStorageUsed: number;
 }

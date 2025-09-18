@@ -87,6 +87,35 @@ export class Message {
   // =============== BASIC STATUS ===============
 
   /**
+   * Message status for delivery and read tracking
+   */
+  @Prop({
+    type: String,
+    enum: ['sent', 'delivered', 'read'],
+    default: 'sent',
+    index: true
+  })
+  status: string;
+
+  /**
+   * When message was delivered
+   */
+  @Prop({
+    type: Date,
+    default: null
+  })
+  deliveredAt?: Date;
+
+  /**
+   * When message was read
+   */
+  @Prop({
+    type: Date,
+    default: null
+  })
+  readAt?: Date;
+
+  /**
    * Soft delete flag - Simple boolean
    */
   @Prop({

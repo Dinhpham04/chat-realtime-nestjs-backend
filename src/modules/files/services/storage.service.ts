@@ -116,7 +116,7 @@ export class StorageService implements IStorageService {
     async getSignedUrl(
         fileId: string,
         userId: string,
-        expiresIn: number = 3600,
+        expiresIn: number = 3600 * 60 * 60 * 24,
         permissions: ('read' | 'download')[] = ['read', 'download'],
         maxDownloads?: number
     ): Promise<string> {

@@ -6,3 +6,4 @@
 
 export * from './request';
 export * from './response';
+export * from './conversation-files.dto';

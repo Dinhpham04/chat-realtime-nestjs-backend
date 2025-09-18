@@ -6,3 +6,4 @@
  */
 
 export * from './conversations.api-docs';
+export * from './conversation-files.api-docs';

@@ -30,6 +30,8 @@ import { ConversationsController } from './controllers';
 
 // External Dependencies
 import { UsersModule } from '../users/users.module';
+import { MessagesModule } from '../messages/messages.module';
+import { FilesModule } from '../files/files.module';
 
 @Module({
   imports: [
@@ -42,7 +44,8 @@ import { UsersModule } from '../users/users.module';
 
     // External Module Dependencies
     UsersModule, // For user validation and user info
-    // Note: MessagesModule will be added when implemented
+    forwardRef(() => MessagesModule), // For message and attachment access
+    forwardRef(() => FilesModule), // For file operations and URLs
   ],
 
   controllers: [

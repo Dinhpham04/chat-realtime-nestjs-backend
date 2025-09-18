@@ -44,6 +44,27 @@ export class FilesService {
     ) { }
 
     /**
+     * Generate preview URL for thumbnail with inline display
+     * @param fileId File identifier
+     * @param userId User requesting the thumbnail
+     * @param expiresIn Expiration time in seconds
+     * @returns Thumbnail preview URL
+     */
+    async generateThumbnailPreviewUrl(
+        fileId: string,
+        userId: string,
+        expiresIn: number = 24 * 60 * 60
+    ): Promise<string> {
+        try {
+            const previewUrl = await this.storageService.getPreviewUrl(fileId, userId, expiresIn);
+            return `${previewUrl}&thumbnail=true`;
+        } catch (error) {
+            this.logger.error(`Failed to generate thumbnail preview URL for ${fileId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
      * Uploads a file with validation and deduplication
      * @param fileInfo File information including buffer
      * @param userId User performing the upload
@@ -92,7 +113,7 @@ export class FilesService {
         const fileData: Partial<File> = {
             fileId,
             originalFilename: fileInfo.originalName,
-            fileName: this.generateFileName(fileInfo.originalName, fileId),
+            fileName: fileInfo.originalName || this.generateFileName(fileInfo.originalName, fileId),
             mimeType: fileInfo.mimeType,
             fileSize: fileInfo.size,
             checksum,
@@ -375,17 +396,19 @@ export class FilesService {
                 // Generate thumbnail URL if available
                 let thumbnailUrl: string | undefined;
                 if (file.thumbnailPath) {
-                    thumbnailUrl = await this.generateDownloadUrl(
-                        attachment.fileId,
-                        userId || '',
-                        { expiresIn: 24 * 60 * 60 }
-                    );
-                    thumbnailUrl = `${thumbnailUrl}&thumbnail=true`;
-                }
-
-                attachmentDtos.push({
+                    try {
+                        // Generate preview URL for thumbnail (inline display)
+                        thumbnailUrl = await this.generateThumbnailPreviewUrl(
+                            attachment.fileId,
+                            userId || '',
+                            24 * 60 * 60 // 24 hours
+                        );
+                    } catch (error) {
+                        this.logger.warn(`Failed to generate thumbnail URL for file ${attachment.fileId}: ${error.message}`);
+                    }
+                } attachmentDtos.push({
                     fileId: attachment.fileId,
-                    fileName: file.fileName,
+                    fileName: file.originalFilename || file.fileName,
                     mimeType: file.mimeType,
                     fileSize: file.fileSize,
                     downloadUrl,
